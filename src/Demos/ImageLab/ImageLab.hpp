@@ -26,9 +26,13 @@ struct ImageProcess
 
 struct ImageProcessStack
 {
+    GL_TextureFloat tex0;
+    GL_TextureFloat tex1;
+
     ImageProcessStack();
+    void Resize(int width, int height);
     std::vector<ImageProcess*> imageProcesses;
-    GLuint Process(GLuint textureIn, GLuint textureOut, int width, int height);
+    GLuint Process(GLuint textureIn, int width, int height);
     void AddProcess(ImageProcess* imageProcess);
     void RenderHistogram();
 
@@ -111,6 +115,40 @@ struct Resampling : public ImageProcess
     void SetUniforms() override;
     void RenderGui() override;
     int pixelSize=1;
+};
+
+struct AddNoise : public ImageProcess
+{
+    AddNoise(bool enabled=true);
+    void SetUniforms() override;
+    void RenderGui() override;
+    float density = 0;
+    float intensity = 1;
+    bool randomColor=false;
+};
+
+struct SmoothingFilter : public ImageProcess
+{
+    SmoothingFilter(bool enabled=true);
+    void SetUniforms() override;
+    void RenderGui() override;
+    int size=3;
+};
+
+struct GaussianBlur : public ImageProcess
+{
+    GaussianBlur(bool enabled=true);
+    void SetUniforms() override;
+    void RenderGui() override;
+
+    void RecalculateKernel();
+    int size=3;
+    float sigma=1;
+    int maxSize = 257;
+    std::vector<float> kernel;
+    GLuint kernelBuffer;
+
+    bool shouldRecalculateKernel=true;
 };
 
 struct GammaCorrection : public ImageProcess

@@ -41,6 +41,18 @@ void ImageProcess::Process(GLuint textureIn, GLuint textureOut, int width, int h
     glMemoryBarrier(GL_ALL_BARRIER_BITS);
 }
 
+void ImageProcessStack::Resize(int width, int height)
+{
+    if(tex0.loaded) tex0.Unload();
+    if(tex1.loaded) tex1.Unload();
+    
+    TextureCreateInfo tci = {};
+    tci.minFilter = GL_LINEAR;
+    tci.magFilter = GL_LINEAR;
+    tex0 = GL_TextureFloat(width, height, tci);
+    tex1 = GL_TextureFloat(width, height, tci);
+}
+
 ImageProcessStack::ImageProcessStack()
 {
     struct HistogramBuffer 
@@ -73,6 +85,8 @@ ImageProcessStack::ImageProcessStack()
     CreateComputeShader("shaders/Histogram.glsl", &histogramShader);
     CreateComputeShader("shaders/ResetHistogram.glsl", &resetHistogramShader);
     CreateComputeShader("shaders/RenderHistogram.glsl", &renderHistogramShader);
+
+
 }
 
 void ImageProcessStack::AddProcess(ImageProcess* imageProcess)
@@ -104,7 +118,7 @@ void ImageProcessStack::RenderHistogram()
     glMemoryBarrier(GL_ALL_BARRIER_BITS);        
 }
 
-GLuint ImageProcessStack::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+GLuint ImageProcessStack::Process(GLuint textureIn, int width, int height)
 {
     std::vector<ImageProcess*> activeProcesses;
     activeProcesses.reserve(imageProcesses.size());
@@ -119,7 +133,7 @@ GLuint ImageProcessStack::Process(GLuint textureIn, GLuint textureOut, int width
         {
             activeProcesses[i]->Process(
                                     textureIn,
-                                    textureOut,
+                                    tex0.glTex,
                                     width, 
                                     height);
         }
@@ -127,14 +141,14 @@ GLuint ImageProcessStack::Process(GLuint textureIn, GLuint textureOut, int width
         {
             bool pairPass = i % 2 == 0;
             activeProcesses[i]->Process(
-                                    pairPass ? textureIn : textureOut, 
-                                    pairPass ? textureOut : textureIn, 
+                                    pairPass ? tex1.glTex : tex0.glTex, 
+                                    pairPass ? tex0.glTex : tex1.glTex, 
                                     width, 
                                     height);
         }
     }
 
-    GLuint resultTexture = (activeProcesses.size() % 2 == 0) ? textureIn : textureOut;
+    GLuint resultTexture = (activeProcesses.size() % 2 == 0) ? tex1.glTex : tex0.glTex;
     //Pass to reset histograms
     {
         glUseProgram(resetHistogramShader);
@@ -572,6 +586,106 @@ void Resampling::RenderGui()
 
 //
 //------------------------------------------------------------------------
+AddNoise::AddNoise(bool enabled) : ImageProcess("AddNoise", "shaders/AddNoise.glsl", enabled)
+{}
+
+void AddNoise::SetUniforms()
+{
+    glUniform1f(glGetUniformLocation(shader, "density"), density);
+    glUniform1f(glGetUniformLocation(shader, "intensity"), intensity);
+    glUniform1i(glGetUniformLocation(shader, "randomColor"), (int)randomColor);
+}
+
+void AddNoise::RenderGui()
+{
+    ImGui::SliderFloat("Density", &density, 0, 1);
+    ImGui::SliderFloat("Intensity", &intensity, -1, 1);
+    ImGui::Checkbox("Random Color", &randomColor);
+}
+//
+
+//
+//------------------------------------------------------------------------
+SmoothingFilter::SmoothingFilter(bool enabled) : ImageProcess("SmoothingFilter", "shaders/SmoothingFilter.glsl", enabled)
+{}
+
+void SmoothingFilter::SetUniforms()
+{
+    glUniform1i(glGetUniformLocation(shader, "size"), size);
+}
+
+void SmoothingFilter::RenderGui()
+{
+    ImGui::SliderInt("Size", &size, 0, 128);
+}
+//
+
+//
+//------------------------------------------------------------------------
+GaussianBlur::GaussianBlur(bool enabled) : ImageProcess("GaussianBlur", "shaders/GaussianBlur.glsl", enabled)
+{
+    kernel.resize(maxSize * maxSize);
+    glGenBuffers(1, (GLuint*)&kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+}
+
+void GaussianBlur::RecalculateKernel()
+{
+    int halfSize = (int)std::floor(size / 2.0f);
+    double r, s = 2.0 * sigma * sigma;
+    double sum = 0.0;
+    
+    for (int x = -halfSize; x <= halfSize; x++) {
+        for (int y = -halfSize; y <= halfSize; y++) {
+            int flatInx = (y + halfSize) * size + (x + halfSize);
+            r = (float)sqrt(x * x + y * y);
+			double num = (exp(-(r * r) / s));
+			double denom = (PI * s);
+            kernel[flatInx] =  (float)(num / denom);
+            sum += kernel[flatInx];
+        }
+    }
+
+    // normalising the Kernel
+    for (int i = 0; i < size; ++i)
+    {
+        for (int j = 0; j < size; ++j)
+        {
+            int flatInx = (i) * size + (j);
+            kernel[flatInx] /= (float)sum;
+        }
+    }
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    shouldRecalculateKernel=false;
+}
+
+void GaussianBlur::SetUniforms()
+{
+    if(shouldRecalculateKernel) RecalculateKernel();
+
+    glUniform1i(glGetUniformLocation(shader, "size"), size);
+    
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+}
+
+void GaussianBlur::RenderGui()
+{
+    shouldRecalculateKernel |= ImGui::SliderInt("Size", &size, 1, maxSize);
+    shouldRecalculateKernel |= ImGui::SliderFloat("Sigma", &sigma, 1, 10);
+
+
+}
+//
+
+//
+//------------------------------------------------------------------------
 GammaCorrection::GammaCorrection(bool enabled) : ImageProcess("GammaCorrection", "shaders/GammaCorrection.glsl", enabled)
 {}
 
@@ -599,13 +713,14 @@ void ImageLab::Load() {
     tci.srgb=true;
     tci.minFilter = GL_LINEAR;
     tci.magFilter = GL_LINEAR;
-    // texture = GL_TextureFloat("resources/Tom.png", tci);
-    texture = GL_TextureFloat("C:/Users/jacqu/OneDrive/Pictures/lowcontrast.PNG", tci);
+    texture = GL_TextureFloat("resources/Tom.png", tci);
     tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
     Quad = GetQuad();
     
-    
+    imageProcessStack.Resize(texture.width, texture.height);
     imageProcessStack.AddProcess(new Transform(true));
+    imageProcessStack.AddProcess(new AddNoise(true));
+    imageProcessStack.AddProcess(new GaussianBlur(true));
 }
 
 void ImageLab::Process()
@@ -624,7 +739,7 @@ void ImageLab::RenderGUI() {
 void ImageLab::Render() {
     
     
-    GLuint outTexture = imageProcessStack.Process(texture.glTex, tmpTexture.glTex, texture.width, texture.height);
+    GLuint outTexture = imageProcessStack.Process(texture.glTex,texture.width, texture.height);
 
     glUseProgram(MeshShader.programShaderObject);
     glActiveTexture(GL_TEXTURE0);
