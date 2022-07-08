@@ -90,6 +90,21 @@ struct Quantization : public ImageProcess
     int numLevels=255;
 };
 
+struct Transform : public ImageProcess
+{
+    Transform(bool enabled=true);
+    void SetUniforms() override;
+    void RenderGui() override;
+    glm::vec2 translation = glm::vec2(0);
+    glm::vec2 scale = glm::vec2(1);
+    glm::vec2 shear = glm::vec2(0);
+    float theta=0;
+    int interpolation=0;
+
+    bool flipX=false;
+    bool flipY=false;
+};
+
 struct Resampling : public ImageProcess
 {
     Resampling(bool enabled=true);

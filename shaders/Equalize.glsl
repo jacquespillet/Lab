@@ -18,7 +18,7 @@ void main()
     vec3 color = imageLoad(textureIn, pixelCoord).rgb;
     if(equalizeColor>0)
     {
-        ivec3 colorInt = ivec3(color * 255.0f);
+        ivec3 colorInt = min(ivec3(254), max(ivec3(0), ivec3(color * 255.0f)));
 
         int lutResultR = lut[colorInt.r].r;
         int lutResultG = lut[colorInt.g].g;
@@ -33,7 +33,7 @@ void main()
     else
     {
         float grayScaleFloat = (color.r + color.g + color.b) * 0.333333;
-        int grayScaleInt = int(grayScaleFloat * 255.0f);
+        int grayScaleInt = min(254, max(0, int(grayScaleFloat * 255.0f)));
         int lutResult = lut[grayScaleInt].a;
         float lutResultFloat = float(lutResult) / 255.0f;
         imageStore ( textureOut , pixelCoord , vec4(lutResultFloat.xxx, 0));

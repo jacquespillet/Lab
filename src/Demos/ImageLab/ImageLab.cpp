@@ -501,6 +501,61 @@ void Quantization::RenderGui()
 
 //
 //------------------------------------------------------------------------
+Transform::Transform(bool enabled) : ImageProcess("Transform", "shaders/Transform.glsl", enabled)
+{}
+
+void Transform::SetUniforms()
+{
+    glm::mat3 transform(1);
+
+    float cosTheta = cos(glm::radians(theta));
+    float sinTheta = sin(glm::radians(theta));
+
+    glm::mat3 rotationMatrix(1);
+    rotationMatrix[0][0] = cosTheta;
+    rotationMatrix[1][0] = -sinTheta;
+    rotationMatrix[0][1] = sinTheta;
+    rotationMatrix[1][1] = cosTheta;
+
+    glm::mat3 translationMatrix(1);
+    translationMatrix[2][0] = translation.x;
+    translationMatrix[2][1] = translation.y;
+
+    glm::mat3 shearMatrix(1);
+    shearMatrix[1][0] = shear.x;
+    shearMatrix[0][1] = shear.y;
+
+    glm::mat3 scaleMatrix(1);
+    scaleMatrix[0][0] = scale.x;
+    scaleMatrix[1][1] = scale.y;
+    
+    
+    transform = rotationMatrix * shearMatrix * scaleMatrix * translationMatrix;
+    transform = glm::inverse(transform);    
+
+    glUniformMatrix3fv(glGetUniformLocation(shader, "transformMatrix"), 1, GL_FALSE, glm::value_ptr(transform));
+    glUniform1i(glGetUniformLocation(shader, "interpolation"), interpolation);
+    
+    glUniform1i(glGetUniformLocation(shader, "flipX"), (int)flipX);
+    glUniform1i(glGetUniformLocation(shader, "flipY"), (int)flipY);
+}
+
+void Transform::RenderGui()
+{
+    ImGui::DragFloat2("Translation", &translation[0], 0.5f);
+    ImGui::DragFloat("Rotation", &theta, 0.2f);
+    ImGui::DragFloat2("Scale", &scale[0], 0.1f);
+    ImGui::DragFloat2("Shear", &shear[0], 0.01f);
+
+    ImGui::Combo("Render Mode", &interpolation, "Nearest\0Bilinear\0Bicubic\0\0");
+
+    ImGui::Checkbox("Flip X", &flipX);
+    ImGui::Checkbox("Flip Y", &flipY);
+}
+//
+
+//
+//------------------------------------------------------------------------
 Resampling::Resampling(bool enabled) : ImageProcess("Resampling", "shaders/Resampling.glsl", enabled)
 {}
 
@@ -550,7 +605,7 @@ void ImageLab::Load() {
     Quad = GetQuad();
     
     
-    imageProcessStack.AddProcess(new Equalize(true));
+    imageProcessStack.AddProcess(new Transform(true));
 }
 
 void ImageLab::Process()
