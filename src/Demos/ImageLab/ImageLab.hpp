@@ -7,6 +7,8 @@
 #include "GL_Helpers/GL_Camera.hpp"
 #include "GL_Helpers/GL_Texture.hpp"
 
+struct ImageProcessStack;
+
 struct ImageProcess
 {
     ImageProcess(std::string name, std::string shaderFileName, bool enabled);
@@ -17,43 +19,48 @@ struct ImageProcess
     std::string name;
     GLint shader;
 
+    ImageProcessStack *imageProcessStack;
+
     bool enabled=true;
 };
 
 struct ImageProcessStack
 {
+    ImageProcessStack();
     std::vector<ImageProcess*> imageProcesses;
     GLuint Process(GLuint textureIn, GLuint textureOut, int width, int height);
+    void AddProcess(ImageProcess* imageProcess);
+    void RenderHistogram();
+
+    void RenderGUI();
+
+    bool histogramR=true, histogramG=true, histogramB=true, histogramGray=false;
+    float minValueGray, maxValueGray;
+    GLint histogramShader, resetHistogramShader, renderHistogramShader;
+    GLuint histogramBuffer, boundsBuffer;
+    GL_TextureFloat histogramTexture;
 };
 
 
 struct ColorContrastStretch : public ImageProcess
 {
-    ColorContrastStretch(GL_TextureFloat *texture, bool enabled=true);
+    ColorContrastStretch(bool enabled=true);
     void SetUniforms() override;
     void RenderGui() override;
     glm::vec3 lowerBound = glm::vec3(0);
     glm::vec3 upperBound = glm::vec3(1);
-    GL_TextureFloat *texture;
-    
     bool global = false;
-    std::vector<float> histogramR;
-    std::vector<float> histogramG;
-    std::vector<float> histogramB;
     float globalLowerBound=0;
     float globalUpperBound=1;
 };
 
-struct ContrastStrech : public ImageProcess
+struct GrayScaleContrastStretch : public ImageProcess
 {
-    ContrastStrech(GL_TextureFloat *texture, bool enabled=true);
+    GrayScaleContrastStretch(bool enabled=true);
     void SetUniforms() override;
     void RenderGui() override;
     float lowerBound = 0;
     float upperBound = 1;
-    std::vector<float> histogramGray;
-    GL_TextureFloat *texture;
-    
 };
 
 struct Negative : public ImageProcess
@@ -101,13 +108,21 @@ struct GammaCorrection : public ImageProcess
 
 struct Equalize : public ImageProcess
 {
-    Equalize(GL_TextureFloat *texture, bool enabled=true);
+    Equalize(bool enabled=true);
     void SetUniforms() override;
     void RenderGui() override;
-    GL_TextureFloat *texture;
-    std::vector<float> histogramR;
-    std::vector<float> histogramG;
-    std::vector<float> histogramB;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+    
+    bool color=true;
+    
+    GLuint lutBuffer;
+    GLuint pdfBuffer;
+    GLint histogramBuffer, boundsBuffer;
+
+    GLint resetHistogramShader;
+    GLint histogramShader;
+    GLint buildPdfShader;
+    GLint buildLutShader;
 };
 
 

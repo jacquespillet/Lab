@@ -41,6 +41,69 @@ void ImageProcess::Process(GLuint textureIn, GLuint textureOut, int width, int h
     glMemoryBarrier(GL_ALL_BARRIER_BITS);
 }
 
+ImageProcessStack::ImageProcessStack()
+{
+    struct HistogramBuffer 
+    {
+        glm::ivec4 histogramGray[255];
+    } histogramData;
+    struct BoundsBuffer 
+    {
+        // glm::ivec4 minBound;
+        glm::ivec4 maxBound;
+    } boundsData;
+
+    glGenBuffers(1, (GLuint*)&histogramBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, histogramBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(HistogramBuffer), &histogramData, GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, histogramBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+
+    glGenBuffers(1, (GLuint*)&boundsBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, boundsBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(BoundsBuffer), &boundsData, GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, boundsBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+
+    TextureCreateInfo tci = {};
+    tci.minFilter = GL_LINEAR;
+    tci.magFilter = GL_LINEAR;
+    histogramTexture = GL_TextureFloat(256, 256, tci);
+
+    CreateComputeShader("shaders/Histogram.glsl", &histogramShader);
+    CreateComputeShader("shaders/ResetHistogram.glsl", &resetHistogramShader);
+    CreateComputeShader("shaders/RenderHistogram.glsl", &renderHistogramShader);
+}
+
+void ImageProcessStack::AddProcess(ImageProcess* imageProcess)
+{
+    imageProcess->imageProcessStack = this;
+    imageProcesses.push_back(imageProcess);
+}
+
+void ImageProcessStack::RenderHistogram()
+{
+    glUseProgram(renderHistogramShader);
+
+    glUniform1i(glGetUniformLocation(renderHistogramShader, "histogramR"), (int)histogramR); //program must be active
+    glUniform1i(glGetUniformLocation(renderHistogramShader, "histogramG"), (int)histogramG); //program must be active
+    glUniform1i(glGetUniformLocation(renderHistogramShader, "histogramB"), (int)histogramB); //program must be active
+    glUniform1i(glGetUniformLocation(renderHistogramShader, "histogramGray"), (int)histogramGray); //program must be active
+
+    glUniform1i(glGetUniformLocation(renderHistogramShader, "textureOut"), 0); //program must be active
+    glBindImageTexture(0, histogramTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, histogramBuffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, histogramBuffer);
+    
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, boundsBuffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, boundsBuffer);
+
+    glDispatchCompute((histogramTexture.width / 32) + 1, (histogramTexture.height / 32) + 1, 1);
+    glUseProgram(0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);        
+}
+
 GLuint ImageProcessStack::Process(GLuint textureIn, GLuint textureOut, int width, int height)
 {
     std::vector<ImageProcess*> activeProcesses;
@@ -71,91 +134,266 @@ GLuint ImageProcessStack::Process(GLuint textureIn, GLuint textureOut, int width
         }
     }
 
-    return (activeProcesses.size() % 2 == 0) ? textureIn : textureOut;
+    GLuint resultTexture = (activeProcesses.size() % 2 == 0) ? textureIn : textureOut;
+    //Pass to reset histograms
+    {
+        glUseProgram(resetHistogramShader);
+        
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, histogramBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, histogramBuffer);
+        
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, boundsBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, boundsBuffer);
+
+        glDispatchCompute(1, 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);        
+    }
+
+    //Pass to calculate histograms
+    {
+        glUseProgram(histogramShader);
+
+        glUniform1i(glGetUniformLocation(histogramShader, "textureIn"), 0); //program must be active
+        glBindImageTexture(0, resultTexture, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, histogramBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, histogramBuffer);
+        
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, boundsBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, boundsBuffer);
+	
+        glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);        
+    }
+    
+    
+    RenderHistogram();
+
+    return resultTexture;
+}
+
+void ImageProcessStack::RenderGUI()
+{
+
+    ImGui::Image((ImTextureID)histogramTexture.glTex, ImVec2(255, 255));
+    ImGui::Checkbox("R", &histogramR); ImGui::SameLine(); 
+    ImGui::Checkbox("G", &histogramG); ImGui::SameLine();
+    ImGui::Checkbox("B", &histogramB); ImGui::SameLine();
+    ImGui::Checkbox("Gray", &histogramGray);
+    
+	ImGui::Separator();
+    ImGui::Text("Post Processes");
+	ImGui::Separator();
+
+    static ImageProcess *selectedImageProcess=nullptr;
+    for (int n = 0; n < imageProcesses.size(); n++)
+    {
+        ImageProcess *item = imageProcesses[n];
+        
+        ImGui::PushID(n);
+        ImGui::Checkbox("", &imageProcesses[n]->enabled);
+        ImGui::PopID();
+        ImGui::SameLine();
+        bool isSelected=false;
+        if(ImGui::Selectable(item->name.c_str(), &isSelected))
+        {
+            selectedImageProcess = item;
+        }
+
+        if (ImGui::IsItemActive() && !ImGui::IsItemHovered())
+        {
+            int n_next = n + (ImGui::GetMouseDragDelta(0).y < 0.f ? -1 : 1);
+            if (n_next >= 0 && n_next < imageProcesses.size())
+            {
+                imageProcesses[n] = imageProcesses[n_next];
+                imageProcesses[n_next] = item;
+                ImGui::ResetMouseDragDelta();
+            }
+        }
+
+        if (isSelected)
+            ImGui::SetItemDefaultFocus();    
+    }    
+
+	ImGui::Separator();
+    
+    if(selectedImageProcess != nullptr)
+    {
+        selectedImageProcess->RenderGui();
+    }
 }
 
 //
 //------------------------------------------------------------------------
-ContrastStrech::ContrastStrech(GL_TextureFloat *texture, bool enabled) : ImageProcess("ContrastStrech", "shaders/ContrastStrech.glsl", enabled), texture(texture)
+GrayScaleContrastStretch::GrayScaleContrastStretch(bool enabled) : ImageProcess("GrayScaleContrastStretch", "shaders/GrayScaleContrastStretch.glsl", enabled)
 {
-    histogramGray = std::vector<float>(255, 0);
 }
 
-void ContrastStrech::SetUniforms()
+void GrayScaleContrastStretch::SetUniforms()
 {
     glUniform1f(glGetUniformLocation(shader, "lowerBound"), lowerBound);
     glUniform1f(glGetUniformLocation(shader, "upperBound"), upperBound);
 }
 
-void ContrastStrech::RenderGui()
+void GrayScaleContrastStretch::RenderGui()
 {
-    ImGui::SliderFloat("lowerBound", &lowerBound, 0, 1);
-    ImGui::SliderFloat("upperBound", &upperBound, 0, 1);
+    ImGui::SetNextItemWidth(255); ImGui::SliderFloat("lowerBound", &lowerBound, 0, 1);
+    ImGui::SetNextItemWidth(255); ImGui::SliderFloat("upperBound", &upperBound, 0, 1);
 
     ImGui::Begin("Parameters : ");
-    
-    float minValueGray = 1e30f;
-    float maxValueGray = -1e30f;
-    for(int i=0; i<texture->width * texture->height; i++)
-    {
-        int pixelIndex = i * 4;
-        int grayScale = (int)((texture->data[pixelIndex + 0] + texture->data[pixelIndex + 1] + texture->data[pixelIndex + 2]) * 0.33333f * 255.0f);
         
-        histogramGray[grayScale]++;
-        minValueGray = std::min(minValueGray, histogramGray[grayScale]);
-        maxValueGray = std::max(maxValueGray, histogramGray[grayScale]);
-    }
-    
-    
     ImGui::End();    
 }
 //
 
 //
 //------------------------------------------------------------------------
-Equalize::Equalize(GL_TextureFloat *texture, bool enabled) : ImageProcess("Equalize", "shaders/Equalize.glsl", enabled), texture(texture)
+Equalize::Equalize(bool enabled) : ImageProcess("Equalize", "shaders/Equalize.glsl", enabled)
 {
-    histogramR = std::vector<float>(255, 0);
-    histogramG = std::vector<float>(255, 0);
-    histogramB = std::vector<float>(255, 0);
+    std::vector<glm::ivec4> lutData(255);
+    glGenBuffers(1, (GLuint*)&lutBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, lutBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, lutData.size() * sizeof(glm::ivec4), lutData.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, lutBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); 
+
+    std::vector<glm::vec4> pdfData(255);
+    glGenBuffers(1, (GLuint*)&pdfBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, pdfBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, pdfData.size() * sizeof(glm::vec4), pdfData.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, pdfBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); 
+
+    struct HistogramBuffer 
+    {
+        glm::ivec4 histogramGray[255];
+    } histogramData;
+    struct BoundsBuffer 
+    {
+        // glm::ivec4 minBound;
+        glm::ivec4 maxBound;
+    } boundsData;
+
+    glGenBuffers(1, (GLuint*)&histogramBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, histogramBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(HistogramBuffer), &histogramData, GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, histogramBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+
+    glGenBuffers(1, (GLuint*)&boundsBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, boundsBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(BoundsBuffer), &boundsData, GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, boundsBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); 
+
+    CreateComputeShader("shaders/EqualizeBuildPdf.glsl", &buildPdfShader);
+    CreateComputeShader("shaders/EqualizeBuildLut.glsl", &buildLutShader);
+    CreateComputeShader("shaders/ResetHistogram.glsl", &resetHistogramShader);
+    CreateComputeShader("shaders/Histogram.glsl", &histogramShader);
 }
 
 void Equalize::SetUniforms()
 {
+    glUniform1i(glGetUniformLocation(shader, "equalizeColor"), (int)color); //program must be active
+}
+
+void Equalize::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    // for(int i=0; i<histogramGray.size(); i++)
+    // {
+    //     pr[i] = histogramGray[i] / (float)(texture->width * texture->height);
+    // }
+    // for(int i=1; i<histogramGray.size(); i++)
+    // {
+    //     s[i] = (int)std::round(255.0f * pr[i]) + s[i-1];
+    // }
+    
+    //Reset histogram
+    {
+        glUseProgram(resetHistogramShader);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, histogramBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, histogramBuffer);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, boundsBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, boundsBuffer);
+        glDispatchCompute(1, 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);        
+    }
+
+    //Pass to calculate histogram of the input image
+    {
+        glUseProgram(histogramShader);
+
+        glUniform1i(glGetUniformLocation(histogramShader, "textureIn"), 0); //program must be active
+        glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, histogramBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, histogramBuffer);
+
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, boundsBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, boundsBuffer);
+	
+        glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);        
+    }
+    
+    
+    { //build lut
+        glUseProgram(buildLutShader);
+        
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, histogramBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, histogramBuffer);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, pdfBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, pdfBuffer);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, lutBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, lutBuffer);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        
+        glUniform1f(glGetUniformLocation(buildLutShader, "textureSize"), (float)(width * height)); //program must be active
+        
+        glDispatchCompute(1, 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);            
+    }
+
+    
+    { //correction pass
+        glUseProgram(shader);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, lutBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, lutBuffer);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        
+        SetUniforms();
+
+        glUniform1i(glGetUniformLocation(shader, "textureIn"), 0); //program must be active
+        glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(shader, "textureOut"), 1); //program must be active
+        glBindImageTexture(1, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);    
+    }
 }
 
 void Equalize::RenderGui()
 {
-
-    // ImGui::SliderFloat("lowerBound", &lowerBound, 0, 1);
-    // ImGui::SliderFloat("upperBound", &upperBound, 0, 1);
-
-    // ImGui::Begin("Parameters : ");
-    
-    // float minValueGray = 1e30f;
-    // float maxValueGray = -1e30f;
-    // for(int i=0; i<texture->width * texture->height; i++)
-    // {
-    //     int pixelIndex = i * 4;
-    //     int grayScale = (int)((texture->data[pixelIndex + 0] + texture->data[pixelIndex + 1] + texture->data[pixelIndex + 2]) * 0.33333f * 255.0f);
-        
-    //     histogramGray[grayScale]++;
-    //     minValueGray = std::min(minValueGray, histogramGray[grayScale]);
-    //     maxValueGray = std::max(maxValueGray, histogramGray[grayScale]);
-    // }
-    
-    
-    ImGui::End();    
+    ImGui::Checkbox("Color", &color);
 }
 //
 
 //
 //------------------------------------------------------------------------
-ColorContrastStretch::ColorContrastStretch(GL_TextureFloat *texture, bool enabled) : ImageProcess("ColorContrastStretch", "shaders/ColorContrastStrech.glsl", enabled), texture(texture)
+ColorContrastStretch::ColorContrastStretch(bool enabled) : ImageProcess("ColorContrastStretch", "shaders/ColorContrastStrech.glsl", enabled)
 {
-    histogramR = std::vector<float>(255, 0);
-    histogramG = std::vector<float>(255, 0);
-    histogramB = std::vector<float>(255, 0);
 }
 
 void ColorContrastStretch::SetUniforms()
@@ -174,56 +412,27 @@ void ColorContrastStretch::SetUniforms()
 
 void ColorContrastStretch::RenderGui()
 {
-    // ImGui::SliderFloat3("lowerBound", &lowerBound[0], 0, 1);
-    // ImGui::SliderFloat3("upperBound", &upperBound[0], 0, 1);
-
+    
     ImGui::Begin("Parameters : ");
     
-    float minValueR = 1e30f; float maxValueR = -1e30f;
-    float minValueG = 1e30f; float maxValueG = -1e30f;
-    float minValueB = 1e30f; float maxValueB = -1e30f;
-    for(int i=0; i<texture->width * texture->height; i++)
-    {
-        int pixelIndex = i * 4;
-        int r = (int)(texture->data[pixelIndex + 0] * 255.0f);
-        int g = (int)(texture->data[pixelIndex + 1] * 255.0f);
-        int b = (int)(texture->data[pixelIndex + 2] * 255.0f);
-        
-        histogramR[r]++;
-        minValueR = std::min(minValueR, histogramR[r]);
-        maxValueR = std::max(maxValueR, histogramR[r]);
-        
-        histogramG[r]++;
-        minValueG = std::min(minValueG, histogramG[g]);
-        maxValueG = std::max(maxValueG, histogramG[g]);
-        
-        histogramB[r]++;
-        minValueB = std::min(minValueB, histogramB[b]);
-        maxValueB = std::max(maxValueB, histogramB[b]);
-    }
-
+ 
     ImGui::Checkbox("Global", &global);
 
     if(global)
     {
-        ImGui::PlotHistogram("Histogram Red", histogramR.data(), (int)histogramR.size(), 0, NULL, minValueR, maxValueR, ImVec2(300,80));
-        ImGui::PlotHistogram("Histogram Green", histogramG.data(), (int)histogramG.size(), 0, NULL, minValueG, maxValueG, ImVec2(300,80));
-        ImGui::PlotHistogram("Histogram Blue", histogramB.data(), (int)histogramB.size(), 0, NULL, minValueB, maxValueB, ImVec2(300,80));
-        
-        ImGui::SetNextItemWidth(300); ImGui::SliderFloat("Lower Bound", &globalLowerBound, 0, 1); 
-        ImGui::SetNextItemWidth(300); ImGui::SliderFloat("Upper Bound", &globalUpperBound, 0, 1);
+        ImGui::DragFloatRange2("Range", &globalLowerBound, &globalUpperBound, 0.01f, 0, 1);
     }
     else
     {
-        ImGui::PlotHistogram("Histogram Red", histogramR.data(), (int)histogramR.size(), 0, NULL, minValueR, maxValueR, ImVec2(300,80));
-        ImGui::SetNextItemWidth(300); ImGui::SliderFloat("Lower Bound Red", &lowerBound.x, 0, 1); ImGui::SetNextItemWidth(300); ImGui::SliderFloat("Upper Bound Red", &upperBound.x, 0, 1);
-        ImGui::PlotHistogram("Histogram Green", histogramG.data(), (int)histogramG.size(), 0, NULL, minValueG, maxValueG, ImVec2(300,80));
-        ImGui::SetNextItemWidth(300); ImGui::SliderFloat("Lower Bound Green", &lowerBound.y, 0, 1); ImGui::SetNextItemWidth(300); ImGui::SliderFloat("Upper Bound Green", &upperBound.y, 0, 1);
-        ImGui::PlotHistogram("Histogram Blue", histogramB.data(), (int)histogramB.size(), 0, NULL, minValueB, maxValueB, ImVec2(300,80));
-        ImGui::SetNextItemWidth(300); ImGui::SliderFloat("Lower Bound Blue", &lowerBound.z, 0, 1); ImGui::SetNextItemWidth(300); ImGui::SliderFloat("Upper Bound Blue", &upperBound.z, 0, 1);
+        ImGui::DragFloatRange2("Range Red", &lowerBound.x, &upperBound.x, 0.01f, 0, 1);
+        ImGui::DragFloatRange2("Range Gren", &lowerBound.y, &upperBound.y, 0.01f, 0, 1);
+        ImGui::DragFloatRange2("Range Blue", &lowerBound.z, &upperBound.z, 0.01f, 0, 1);
     }
     
     ImGui::End();    
+
+    
+    
 }
 //
 
@@ -335,12 +544,13 @@ void ImageLab::Load() {
     tci.srgb=true;
     tci.minFilter = GL_LINEAR;
     tci.magFilter = GL_LINEAR;
-    texture = GL_TextureFloat("resources/Tom.png", tci);
+    // texture = GL_TextureFloat("resources/Tom.png", tci);
+    texture = GL_TextureFloat("C:/Users/jacqu/OneDrive/Pictures/lowcontrast.PNG", tci);
     tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
     Quad = GetQuad();
     
     
-    imageProcessStack.imageProcesses.push_back(new Equalize(&texture, true));
+    imageProcessStack.AddProcess(new Equalize(true));
 }
 
 void ImageLab::Process()
@@ -350,51 +560,10 @@ void ImageLab::Process()
 
 void ImageLab::RenderGUI() {
 
-    
-
     ImGui::Begin("Parameters : ");
-
-    ImGui::Text("Post Processes");
-	ImGui::Separator();
-
-    static ImageProcess *selectedImageProcess=nullptr;
-    for (int n = 0; n < imageProcessStack.imageProcesses.size(); n++)
-    {
-        ImageProcess *item = imageProcessStack.imageProcesses[n];
-        
-        ImGui::PushID(n);
-        ImGui::Checkbox("", &imageProcessStack.imageProcesses[n]->enabled);
-        ImGui::PopID();
-        ImGui::SameLine();
-        bool isSelected=false;
-        if(ImGui::Selectable(item->name.c_str(), &isSelected))
-        {
-            selectedImageProcess = item;
-        }
-
-        if (ImGui::IsItemActive() && !ImGui::IsItemHovered())
-        {
-            int n_next = n + (ImGui::GetMouseDragDelta(0).y < 0.f ? -1 : 1);
-            if (n_next >= 0 && n_next < imageProcessStack.imageProcesses.size())
-            {
-                imageProcessStack.imageProcesses[n] = imageProcessStack.imageProcesses[n_next];
-                imageProcessStack.imageProcesses[n_next] = item;
-                ImGui::ResetMouseDragDelta();
-            }
-        }
-
-        if (isSelected)
-            ImGui::SetItemDefaultFocus();    
-    }    
-
-	ImGui::Separator();
-    
-    if(selectedImageProcess != nullptr)
-    {
-        selectedImageProcess->RenderGui();
-    }
-
+    imageProcessStack.RenderGUI();
     ImGui::End();    
+
 }
 
 void ImageLab::Render() {
