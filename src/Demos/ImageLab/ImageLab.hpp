@@ -50,10 +50,6 @@ struct ImageProcessStack
     bool changed=false;
 };
 
-//FFT :
-// https://www.fftw.org/fftw3_doc/Multi_002dDimensional-DFTs-of-Real-Data.html
-// https://www.fftw.org/fftw3_doc/Multi_002dDimensional-DFTs-of-Real-Data.html
-
 
 
 struct ColorContrastStretch : public ImageProcess
@@ -193,6 +189,25 @@ struct GaussianBlur : public ImageProcess
     bool shouldRecalculateKernel=true;
 };
 
+struct ArbitraryFilter : public ImageProcess
+{
+    ArbitraryFilter(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+
+    void RecalculateKernel();
+    int sizeX=3;
+    int sizeY=3;
+    int maxSize = 257;
+
+    bool normalize=false;
+    std::vector<float> kernel;
+    std::vector<float> normalizedKernel;
+    GLuint kernelBuffer;
+
+    bool shouldRecalculateKernel=true;
+};
+
 struct GammaCorrection : public ImageProcess
 {
     GammaCorrection(bool enabled=true);
@@ -221,12 +236,24 @@ struct Equalize : public ImageProcess
 };
 
 
-struct FFT : public ImageProcess
+struct FFTBlur : public ImageProcess
 {
-    FFT(bool enabled=true);
+    FFTBlur(bool enabled=true);
     void SetUniforms() override;
     bool RenderGui() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+
+    enum class Type 
+    {
+        BOX,
+        CIRCLE,
+        GAUSSIAN
+    } filter = Type::GAUSSIAN;
+
+    int radius=10;
+    float sigma = 0.1f;
+
+    GLuint fftTexture;
 };
 
 
