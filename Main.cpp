@@ -12,6 +12,7 @@
 
 #include "Demos/Demo.hpp"
 #include "Demos/ImageLab/ImageLab.hpp"
+#include "Demos/AudioLab/AudioLab.hpp"
 
 
 
@@ -32,6 +33,12 @@ struct DemoManager {
         {
         case 0:
             demo = new ImageLab;
+            demo->windowWidth = windowWidth;
+            demo->windowHeight = windowHeight;
+            demo->Load();
+            break;
+        case 1:
+            demo = new AudioLab;
             demo->windowWidth = windowWidth;
             demo->windowHeight = windowHeight;
             demo->Load();
@@ -69,6 +76,14 @@ struct DemoManager {
         }
     }
 
+    void Key(int keyCode, int action)
+    {
+        if(demo !=nullptr)
+        {
+            demo->Key(keyCode, action);
+        }
+    }
+
     void Render() {
         if(demo!=nullptr) {
             demo->Render();
@@ -95,6 +110,7 @@ static void ErrorCallback(int error, const char* description)
 void CursorPositionCallback(GLFWwindow* window, double xpos, double ypos);
 void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
+void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
 struct App {
 public:
@@ -129,7 +145,8 @@ public:
         glfwSetCursorPosCallback(window, CursorPositionCallback);
         glfwSetMouseButtonCallback(window, MouseButtonCallback);
         glfwSetScrollCallback(window, ScrollCallback);
-        
+        glfwSetKeyCallback(window, KeyCallback);
+
         // glDisable(GL_CULL_FACE);
         
         // glEnable(GL_STENCIL_TEST);    
@@ -236,7 +253,10 @@ public:
     void Scroll(float yOffset) {
         demoManager.Scroll(yOffset);
     }
-
+    void Key(int keyCode, int action)
+    {
+        demoManager.Key(keyCode, action);
+    }
  
 
     GLFWwindow* window;
@@ -252,6 +272,10 @@ private:
             if(ImGui::Button("Image Lab", ImVec2(100, 20))) {
                 demoManager.ClearDemo();
                 demoManager.LoadDemo(0);
+            }
+            if(ImGui::Button("Audio Lab", ImVec2(100, 20))) {
+                demoManager.ClearDemo();
+                demoManager.LoadDemo(1);
             }
             demoManager.RenderGUI();
             ImGui::End();
@@ -275,12 +299,18 @@ void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
     app.Scroll((float)yoffset);
 }
 
+void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    app.Key(key, action);
+}
 
 
 int main(int, char**)
 {
+    
     app.InitWindow();
     app.InitImGUI();
-    app.Start();    
+    app.Start();   
+     
     return 0;
 }

@@ -21,11 +21,11 @@ void main()
     float inverseSize = 1.0f / float(size * size);
     vec3 color = vec3(0,0,0);
     int x=0;
-    for(int xx = pixelCoord.x - halfSize; xx < pixelCoord.x + halfSize; xx++)
+    for(int xx = pixelCoord.x - halfSize; xx <= pixelCoord.x + halfSize; xx++)
     {
         x++;
         int y=0;
-        for(int yy = pixelCoord.y - halfSize; yy < pixelCoord.y + halfSize; yy++)
+        for(int yy = pixelCoord.y - halfSize; yy <= pixelCoord.y + halfSize; yy++)
         {
             int flatInx = y * size + x;
 

@@ -13,6 +13,7 @@ public:
     virtual void RightClickDown(){}
     virtual void RightClickUp(){}
     virtual void Scroll(float offset){}
+    virtual void Key(int keyCode, int action){}
 
     int windowWidth, windowHeight;
 

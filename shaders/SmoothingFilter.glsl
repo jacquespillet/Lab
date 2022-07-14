@@ -17,9 +17,9 @@ void main()
     int halfSize = size /2 ;
     float inverseSize = 1.0f / float(size * size);
     vec3 color = vec3(0,0,0);
-    for(int xx = pixelCoord.x - halfSize; xx < pixelCoord.x + halfSize; xx++)
+    for(int xx = pixelCoord.x - halfSize; xx <= pixelCoord.x + halfSize; xx++)
     {
-        for(int yy = pixelCoord.y - halfSize; yy < pixelCoord.y + halfSize; yy++)
+        for(int yy = pixelCoord.y - halfSize; yy <= pixelCoord.y + halfSize; yy++)
         {
             
             ivec2 samplePos = ivec2(xx, yy);

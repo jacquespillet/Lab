@@ -10,9 +10,12 @@
 
 #include "imgui.h"
 
+#include <complex>
+#include <fftw3.h>
+
 ImageProcess::ImageProcess(std::string name, std::string shaderFileName, bool enabled) :name(name), shaderFileName(shaderFileName), enabled(enabled)
 {
-    CreateComputeShader(shaderFileName, &shader);
+    if(shaderFileName != "") CreateComputeShader(shaderFileName, &shader);
 }
 
 void ImageProcess::SetUniforms()
@@ -20,9 +23,9 @@ void ImageProcess::SetUniforms()
     
 }
 
-void ImageProcess::RenderGui()
+bool ImageProcess::RenderGui()
 {
-
+    return false;
 }
 
 void ImageProcess::Process(GLuint textureIn, GLuint textureOut, int width, int height)
@@ -52,6 +55,7 @@ void ImageProcessStack::Resize(int width, int height)
     tex0 = GL_TextureFloat(width, height, tci);
     tex1 = GL_TextureFloat(width, height, tci);
 }
+
 
 ImageProcessStack::ImageProcessStack()
 {
@@ -188,9 +192,10 @@ GLuint ImageProcessStack::Process(GLuint textureIn, int width, int height)
     return resultTexture;
 }
 
-void ImageProcessStack::RenderGUI()
+bool ImageProcessStack::RenderGUI()
 {
-
+    changed=false;
+    
     ImGui::Image((ImTextureID)histogramTexture.glTex, ImVec2(255, 255));
     ImGui::Checkbox("R", &histogramR); ImGui::SameLine(); 
     ImGui::Checkbox("G", &histogramG); ImGui::SameLine();
@@ -207,7 +212,7 @@ void ImageProcessStack::RenderGUI()
         ImageProcess *item = imageProcesses[n];
         
         ImGui::PushID(n);
-        ImGui::Checkbox("", &imageProcesses[n]->enabled);
+        changed |= ImGui::Checkbox("", &imageProcesses[n]->enabled);
         ImGui::PopID();
         ImGui::SameLine();
         bool isSelected=false;
@@ -235,8 +240,10 @@ void ImageProcessStack::RenderGUI()
     
     if(selectedImageProcess != nullptr)
     {
-        selectedImageProcess->RenderGui();
+        changed |= selectedImageProcess->RenderGui();
     }
+
+    return changed;
 }
 
 //
@@ -251,14 +258,17 @@ void GrayScaleContrastStretch::SetUniforms()
     glUniform1f(glGetUniformLocation(shader, "upperBound"), upperBound);
 }
 
-void GrayScaleContrastStretch::RenderGui()
+bool GrayScaleContrastStretch::RenderGui()
 {
-    ImGui::SetNextItemWidth(255); ImGui::SliderFloat("lowerBound", &lowerBound, 0, 1);
-    ImGui::SetNextItemWidth(255); ImGui::SliderFloat("upperBound", &upperBound, 0, 1);
+    bool changed=false;
+    ImGui::SetNextItemWidth(255); changed |= ImGui::SliderFloat("lowerBound", &lowerBound, 0, 1);
+    ImGui::SetNextItemWidth(255); changed |= ImGui::SliderFloat("upperBound", &upperBound, 0, 1);
 
     ImGui::Begin("Parameters : ");
         
     ImGui::End();    
+
+    return changed;
 }
 //
 
@@ -398,9 +408,11 @@ void Equalize::Process(GLuint textureIn, GLuint textureOut, int width, int heigh
     }
 }
 
-void Equalize::RenderGui()
+bool Equalize::RenderGui()
 {
-    ImGui::Checkbox("Color", &color);
+    bool changed=false;
+    changed |= ImGui::Checkbox("Color", &color);
+    return changed;
 }
 //
 
@@ -424,29 +436,29 @@ void ColorContrastStretch::SetUniforms()
     }
 }
 
-void ColorContrastStretch::RenderGui()
+bool ColorContrastStretch::RenderGui()
 {
-    
+    bool changed=false;
     ImGui::Begin("Parameters : ");
     
  
-    ImGui::Checkbox("Global", &global);
+    changed |= ImGui::Checkbox("Global", &global);
 
     if(global)
     {
-        ImGui::DragFloatRange2("Range", &globalLowerBound, &globalUpperBound, 0.01f, 0, 1);
+        changed |= ImGui::DragFloatRange2("Range", &globalLowerBound, &globalUpperBound, 0.01f, 0, 1);
     }
     else
     {
-        ImGui::DragFloatRange2("Range Red", &lowerBound.x, &upperBound.x, 0.01f, 0, 1);
-        ImGui::DragFloatRange2("Range Gren", &lowerBound.y, &upperBound.y, 0.01f, 0, 1);
-        ImGui::DragFloatRange2("Range Blue", &lowerBound.z, &upperBound.z, 0.01f, 0, 1);
+        changed |= ImGui::DragFloatRange2("Range Red", &lowerBound.x, &upperBound.x, 0.01f, 0, 1);
+        changed |= ImGui::DragFloatRange2("Range Gren", &lowerBound.y, &upperBound.y, 0.01f, 0, 1);
+        changed |= ImGui::DragFloatRange2("Range Blue", &lowerBound.z, &upperBound.z, 0.01f, 0, 1);
     }
     
     ImGui::End();    
 
     
-    
+    return changed;    
 }
 //
 
@@ -458,8 +470,8 @@ Negative::Negative(bool enabled) : ImageProcess("Negative", "shaders/Negative.gl
 void Negative::SetUniforms()
 {}
 
-void Negative::RenderGui()
-{}
+bool Negative::RenderGui()
+{ return false;}
 //
 
 //
@@ -481,19 +493,22 @@ void Threshold::SetUniforms()
     }
 }
 
-void Threshold::RenderGui()
+bool Threshold::RenderGui()
 {
+    bool changed=false;
     ImGui::Checkbox("Global", &global);
     if(global)
     {
-        ImGui::SliderFloat("Lower bound", &globalLower, 0, 1);
-        ImGui::SliderFloat("upper bound", &globalUpper, 0, 1);
+        changed |= ImGui::SliderFloat("Lower bound", &globalLower, 0, 1);
+        changed |= ImGui::SliderFloat("upper bound", &globalUpper, 0, 1);
     }
     else
     {
-        ImGui::SliderFloat3("Lower bound", &lower[0], 0, 1);
-        ImGui::SliderFloat3("upper bound", &upper[0], 0, 1);
+        changed |= ImGui::SliderFloat3("Lower bound", &lower[0], 0, 1);
+        changed |= ImGui::SliderFloat3("upper bound", &upper[0], 0, 1);
     }
+
+    return changed;
 }
 //
 
@@ -507,9 +522,11 @@ void Quantization::SetUniforms()
     glUniform1i(glGetUniformLocation(shader, "levels"), numLevels);
 }
 
-void Quantization::RenderGui()
+bool Quantization::RenderGui()
 {
-    ImGui::SliderInt("Levels", &numLevels, 2, 255);
+    bool changed=false;
+    changed |= ImGui::SliderInt("Levels", &numLevels, 2, 255);
+    return changed;
 }
 //
 
@@ -554,17 +571,21 @@ void Transform::SetUniforms()
     glUniform1i(glGetUniformLocation(shader, "flipY"), (int)flipY);
 }
 
-void Transform::RenderGui()
+bool Transform::RenderGui()
 {
-    ImGui::DragFloat2("Translation", &translation[0], 0.5f);
-    ImGui::DragFloat("Rotation", &theta, 0.2f);
-    ImGui::DragFloat2("Scale", &scale[0], 0.1f);
-    ImGui::DragFloat2("Shear", &shear[0], 0.01f);
+    bool changed=false;
+    
+    changed |= ImGui::DragFloat2("Translation", &translation[0], 0.5f);
+    changed |= ImGui::DragFloat("Rotation", &theta, 0.2f);
+    changed |= ImGui::DragFloat2("Scale", &scale[0], 0.1f);
+    changed |= ImGui::DragFloat2("Shear", &shear[0], 0.01f);
 
-    ImGui::Combo("Render Mode", &interpolation, "Nearest\0Bilinear\0Bicubic\0\0");
+    changed |= ImGui::Combo("Render Mode", &interpolation, "Nearest\0Bilinear\0Bicubic\0\0");
 
-    ImGui::Checkbox("Flip X", &flipX);
-    ImGui::Checkbox("Flip Y", &flipY);
+    changed |= ImGui::Checkbox("Flip X", &flipX);
+    changed |= ImGui::Checkbox("Flip Y", &flipY);
+
+    return changed;
 }
 //
 
@@ -578,9 +599,11 @@ void Resampling::SetUniforms()
     glUniform1i(glGetUniformLocation(shader, "pixelSize"), pixelSize);
 }
 
-void Resampling::RenderGui()
+bool Resampling::RenderGui()
 {
-    ImGui::SliderInt("Pixel Size", &pixelSize, 1, 255);
+    bool changed=false;
+    changed |= ImGui::SliderInt("Pixel Size", &pixelSize, 1, 255);
+    return changed;
 }
 //
 
@@ -596,11 +619,14 @@ void AddNoise::SetUniforms()
     glUniform1i(glGetUniformLocation(shader, "randomColor"), (int)randomColor);
 }
 
-void AddNoise::RenderGui()
+bool AddNoise::RenderGui()
 {
-    ImGui::SliderFloat("Density", &density, 0, 1);
-    ImGui::SliderFloat("Intensity", &intensity, -1, 1);
-    ImGui::Checkbox("Random Color", &randomColor);
+    bool changed=false;
+    changed |= ImGui::SliderFloat("Density", &density, 0, 1);
+    changed |= ImGui::SliderFloat("Intensity", &intensity, -1, 1);
+    changed |= ImGui::Checkbox("Random Color", &randomColor);
+
+    return changed;
 }
 //
 
@@ -614,9 +640,79 @@ void SmoothingFilter::SetUniforms()
     glUniform1i(glGetUniformLocation(shader, "size"), size);
 }
 
-void SmoothingFilter::RenderGui()
+bool SmoothingFilter::RenderGui()
 {
-    ImGui::SliderInt("Size", &size, 0, 128);
+    bool changed=false;
+    changed |= ImGui::SliderInt("Size", &size, 0, 128);
+    return changed;
+}
+//
+
+//
+//------------------------------------------------------------------------
+SharpenFilter::SharpenFilter(bool enabled) : ImageProcess("SharpenFilter", "shaders/SharpenFilter.glsl", enabled)
+{}
+
+void SharpenFilter::SetUniforms()
+{
+}
+
+bool SharpenFilter::RenderGui()
+{
+    return false;
+}
+//
+
+//
+//------------------------------------------------------------------------
+MedianFilter::MedianFilter(bool enabled) : ImageProcess("MedianFilter", "shaders/MedianFilter.glsl", enabled)
+{}
+
+void MedianFilter::SetUniforms()
+{
+}
+
+bool MedianFilter::RenderGui()
+{
+    return false;
+}
+//
+
+//
+//------------------------------------------------------------------------
+SobelFilter::SobelFilter(bool enabled) : ImageProcess("SobelFilter", "shaders/SobelFilter.glsl", enabled)
+{}
+
+void SobelFilter::SetUniforms()
+{
+    glUniform1i(glGetUniformLocation(shader, "vertical"), (int)vertical);
+}
+
+bool SobelFilter::RenderGui()
+{
+    bool changed=false;
+    changed |= ImGui::Checkbox("Vertical", &vertical);
+    return changed;
+}
+//
+
+//
+//------------------------------------------------------------------------
+MinMaxFilter::MinMaxFilter(bool enabled) : ImageProcess("MinMaxFilter", "shaders/MinMaxFilter.glsl", enabled)
+{}
+
+void MinMaxFilter::SetUniforms()
+{
+    glUniform1i(glGetUniformLocation(shader, "size"), size);
+    glUniform1i(glGetUniformLocation(shader, "doMin"), doMin);
+}
+
+bool MinMaxFilter::RenderGui()
+{
+    bool changed=false;
+    changed |= ImGui::Checkbox("Min", &doMin);
+    changed |= ImGui::SliderInt("size", &size, 1, 32);
+    return changed;
 }
 //
 
@@ -675,12 +771,14 @@ void GaussianBlur::SetUniforms()
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
 }
 
-void GaussianBlur::RenderGui()
+bool GaussianBlur::RenderGui()
 {
+    bool changed=false;
     shouldRecalculateKernel |= ImGui::SliderInt("Size", &size, 1, maxSize);
     shouldRecalculateKernel |= ImGui::SliderFloat("Sigma", &sigma, 1, 10);
 
-
+    changed |= shouldRecalculateKernel;
+    return changed;
 }
 //
 
@@ -694,12 +792,204 @@ void GammaCorrection::SetUniforms()
     glUniform1f(glGetUniformLocation(shader, "gamma"), gamma);
 }
 
-void GammaCorrection::RenderGui()
+bool GammaCorrection::RenderGui()
 {
-    ImGui::SliderFloat("Gamma", &gamma, 0.01f, 5);
+    bool changed=false;
+    changed |= ImGui::SliderFloat("Gamma", &gamma, 0.01f, 5);
+    return changed;
 }
 //
 
+
+//
+//------------------------------------------------------------------------
+FFT::FFT(bool enabled) : ImageProcess("FFT", "", enabled)
+{}
+
+void FFT::SetUniforms()
+{
+}
+
+bool FFT::RenderGui()
+{
+    return false;
+}
+void CorrectCoordinates(unsigned int width, unsigned int height, unsigned int i, unsigned int j, unsigned int *x,
+        unsigned int *y) {
+
+    if(i < width/2) *x = i + width / 2;
+    else            *x = i - width / 2;
+    
+    if(j < height/2) *y = j + height / 2;
+    else             *y = j - height / 2;
+
+}
+
+void change_symmetryBackwards(unsigned int width, unsigned int height, unsigned int i, unsigned int j, unsigned int *x,
+        unsigned int *y) {
+
+
+    if (i < width / 2 && j < height / 2) {
+        *x = i - width / 2;
+        *y = j - height / 2;
+    }
+    if (i >= width / 2 && j < height / 2) {
+        *x = i + width / 2;
+        *y = j - height / 2;
+    }
+    if (i < width / 2 && j >= height / 2) {
+        *x = i - width / 2;
+        *y = j + height / 2;
+    }
+    if (i >= width / 2 && j >= height / 2) {
+        *x = i + width / 2;
+        *y = j + height / 2;
+    }
+}
+void FFT::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    int subSize = 32;
+
+
+    //Read back from texture
+    std::vector<float> textureData(width * height * 4, 0);
+    glBindTexture(GL_TEXTURE_2D, textureIn);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    textureData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    std::vector<std::complex<double>> textureDataComplexOutCorrectedRed(width * height);
+    std::vector<std::complex<double>> textureDataComplexOutCorrectedGreen(width * height);
+    std::vector<std::complex<double>> textureDataComplexOutCorrectedBlue(width * height);
+    
+    std::vector<std::complex<double>> textureDataComplexOutRed(width * height);
+    std::vector<std::complex<double>> textureDataComplexOutGreen(width * height);
+    std::vector<std::complex<double>> textureDataComplexOutBlue(width * height);
+    
+    std::vector<std::complex<double>> textureDataComplexInRed(width * height);
+    std::vector<std::complex<double>> textureDataComplexInGreen(width * height);
+    std::vector<std::complex<double>> textureDataComplexInBlue(width * height);
+    
+    for(size_t i=0; i<width * height; i++)
+    {
+        textureDataComplexInRed[i] = std::complex<double>((double)textureData[i * 4 + 0], 0);
+        textureDataComplexInGreen[i] = std::complex<double>((double)textureData[i * 4 + 1], 0);
+        textureDataComplexInBlue[i] = std::complex<double>((double)textureData[i * 4 + 2], 0);
+    }
+    
+	
+    fftw_plan planRed = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexInRed.data(), (fftw_complex*)textureDataComplexOutRed.data(), FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_plan planGreen = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexInGreen.data(), (fftw_complex*)textureDataComplexOutGreen.data(), FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_plan planBlue = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexInBlue.data(), (fftw_complex*)textureDataComplexOutBlue.data(), FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_execute(planRed);
+    fftw_execute(planGreen);
+    fftw_execute(planBlue);
+
+
+    for(int y=0; y<height; y++)
+    {
+    for(int x=0; x<width; x++)
+    {
+        int flatInx = y * width + x;
+        
+        uint32_t correctedX=x, correctedY=y;
+        CorrectCoordinates(width, height, x, y, &correctedX, &correctedY);
+        int correctedInx = correctedY * width + correctedX;
+        
+        
+        textureDataComplexOutCorrectedRed[flatInx] = textureDataComplexOutRed[correctedInx];
+        textureDataComplexOutCorrectedGreen[flatInx] = textureDataComplexOutGreen[correctedInx];
+        textureDataComplexOutCorrectedBlue[flatInx] = textureDataComplexOutBlue[correctedInx];
+        
+        // int outInx = 4 * (y * width + x);
+        // textureData[outInx + 0] = mag;
+        // textureData[outInx + 1] = mag;
+        // textureData[outInx + 2] = mag;
+        // textureData[outInx + 3] = 1;
+    }
+    }
+
+    ///Do some filtering here
+
+    for(int y=-1; y<1; y++)
+    {
+        for(int x=-1; x<1; x++)
+        {
+            int cx = x + width/2;
+            int cy = y + height/2;
+            int inx = cy * width + cx;
+            textureDataComplexOutCorrectedRed[inx]= std::complex<double>(0,0);
+            textureDataComplexOutCorrectedGreen[inx]= std::complex<double>(0,0);
+            textureDataComplexOutCorrectedBlue[inx]= std::complex<double>(0,0);
+        }
+    }
+
+
+    //
+    
+    for(int y=0; y<height; y++)
+    {
+        for(int x=0; x<width; x++)
+        {
+            int flatInx = y * width + x;
+
+            uint32_t correctedX=x, correctedY=y;
+            CorrectCoordinates(width, height, x, y, &correctedX, &correctedY);
+            int correctedInx = correctedY * width + correctedX;
+            textureDataComplexOutRed[correctedInx] = textureDataComplexOutCorrectedRed[flatInx];
+            textureDataComplexOutGreen[correctedInx] = textureDataComplexOutCorrectedGreen[flatInx];
+            textureDataComplexOutBlue[correctedInx] = textureDataComplexOutCorrectedBlue[flatInx];
+        }
+    }
+    
+    
+    fftw_plan backwardsRed = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexOutRed.data(), (fftw_complex*)textureDataComplexInRed.data(),FFTW_BACKWARD, FFTW_ESTIMATE);
+    fftw_plan backwardsGreen = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexOutGreen.data(), (fftw_complex*)textureDataComplexInGreen.data(),FFTW_BACKWARD, FFTW_ESTIMATE);
+    fftw_plan backwardsBlue = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexOutBlue.data(), (fftw_complex*)textureDataComplexInBlue.data(),FFTW_BACKWARD, FFTW_ESTIMATE);
+    fftw_execute(backwardsRed);
+    fftw_execute(backwardsGreen);
+    fftw_execute(backwardsBlue);
+
+    for(int y=0; y<height; y++)
+    {
+    for(int x=0; x<width; x++)
+    {
+        int i = y * (width) + x;
+        float red = (float)textureDataComplexInRed[i].real() / (float)(width * height);
+        float green = (float)textureDataComplexInGreen[i].real() / (float)(width * height);
+        float blue = (float)textureDataComplexInBlue[i].real() / (float)(width * height);
+    
+        
+
+        int outInx = 4 * (y * width + x);
+        textureData[outInx + 0] = red;
+        textureData[outInx + 1] = green;
+        textureData[outInx + 2] = blue;
+        textureData[outInx + 3] = 1;
+    }
+    }
+
+
+    fftw_destroy_plan(planRed);
+    fftw_destroy_plan(planGreen);
+    fftw_destroy_plan(planBlue);
+    fftw_destroy_plan(backwardsRed);
+    fftw_destroy_plan(backwardsGreen);
+    fftw_destroy_plan(backwardsBlue);
+    // fftw_destroy_plan(q);
+
+
+
+    glBindTexture(GL_TEXTURE_2D, textureOut);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, textureData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+}
+
+//
 
 
 ImageLab::ImageLab() {
@@ -717,10 +1007,14 @@ void ImageLab::Load() {
     tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
     Quad = GetQuad();
     
+
+
     imageProcessStack.Resize(texture.width, texture.height);
     imageProcessStack.AddProcess(new Transform(true));
     imageProcessStack.AddProcess(new AddNoise(true));
-    imageProcessStack.AddProcess(new GaussianBlur(true));
+    imageProcessStack.AddProcess(new MinMaxFilter(true));
+    imageProcessStack.AddProcess(new Equalize(true));
+    imageProcessStack.AddProcess(new FFT(true));
 }
 
 void ImageLab::Process()
@@ -729,17 +1023,38 @@ void ImageLab::Process()
 }
 
 void ImageLab::RenderGUI() {
+    shouldProcess=false;
 
     ImGui::Begin("Parameters : ");
-    imageProcessStack.RenderGUI();
+    shouldProcess |= imageProcessStack.RenderGUI();
     ImGui::End();    
 
+    // struct ColorContrastStretch
+    // struct GrayScaleContrastStretch
+    // struct Negative
+    // struct Threshold
+    // struct Quantization
+    // struct Transform
+    // struct Resampling
+    // struct AddNoise
+    // struct SmoothingFilter
+    // struct SharpenFilter
+    // struct SobelFilter
+    // struct MedianFilter
+    // struct MinMaxFilter
+    // struct GaussianBlur
+    // struct GammaCorrection
+    // struct Equalize
 }
 
 void ImageLab::Render() {
     
-    
-    GLuint outTexture = imageProcessStack.Process(texture.glTex,texture.width, texture.height);
+    if(shouldProcess || firstFrame)
+    {
+        std::cout << "PROCESSING "<< std::endl;
+        outTexture = imageProcessStack.Process(texture.glTex,texture.width, texture.height);
+        shouldProcess=false;
+    }
 
     glUseProgram(MeshShader.programShaderObject);
     glActiveTexture(GL_TEXTURE0);
@@ -747,6 +1062,8 @@ void ImageLab::Render() {
     glUniform1i(glGetUniformLocation(MeshShader.programShaderObject, "textureImage"), 0);
 
     Quad->RenderShader(MeshShader.programShaderObject);
+
+    firstFrame=false;
 }
 
 void ImageLab::Unload() {

@@ -1,0 +1,11 @@
+prefix=D:/Boulot/2022/ext/fftw-3.3.10/build/install
+exec_prefix=D:/Boulot/2022/ext/fftw-3.3.10/build/install
+libdir=D:/Boulot/2022/ext/fftw-3.3.10/build/install/lib
+includedir=D:/Boulot/2022/ext/fftw-3.3.10/build/install/include
+
+Name: FFTW
+Description: fast Fourier transform library
+Version: 3.3.9
+Libs: -L${libdir} -lfftw3 
+Libs.private: -lm
+Cflags: -I${includedir}
