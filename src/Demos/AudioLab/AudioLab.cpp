@@ -95,18 +95,21 @@ double GetWave(double frequency, int waveType, double time, double LFOAmplitude,
 double AudioLab::Noise(double time)
 {
     double result=0;
-    for(int i=0; i<envelopes.size(); i++)
-    {
-        // double wave = 0;
-        // wave += 1.0 * GetWave(envelopes[i].frequency, 1, time, 0.001, 5);
-        // wave += 0.5 * GetWave(envelopes[i].frequency * 1.5, 1, time);
-        // wave += 0.25 * GetWave(envelopes[i].frequency * 2, 1, time);
-        // wave += 0.05 * GetWave(envelopes[i].frequency, 5, time);
 
-        double wave = instrument->sound(envelopes[i].frequency, time);
-        double envelopeAmplitude = envelopes[i].GetAmplitude(time);
+    double weight = 1.0f / (double)notes.size();
+
+	if (notes.size() == 0) return 0;
+    for(int i = notes.size() - 1; i >= 0; i--)
+    {
+
+        double wave = instrument->sound(notes[i].frequency, time);
         
-        result += wave * envelopeAmplitude;
+        bool finished=false;
+        double envelopeAmplitude = instrument->envelope.GetAmplitude(time, notes[i].startTime, notes[i].endTime, finished);
+
+
+        
+        result += wave * envelopeAmplitude * weight;
     }
     result *= amplitude;
     result = (std::min)(1.0, (std::max)(-1.0, result));
@@ -114,16 +117,16 @@ double AudioLab::Noise(double time)
 }
 
 AudioLab::AudioLab() {
-    instrument = new Bell();
+    instrument = new Harmonica();
     std::vector<std::string> devices = olcNoiseMaker<short>::Enumerate();
     sound = new olcNoiseMaker<short>(devices[0], sampleRate, 1, 8, 512);
     timeStep = 1.0 / (double)sampleRate;
 
     sound->SetUserFunction(Oscillator, (void*)this);
 
-    for(int i=0; i<envelopes.size(); i++)
+    for(int i=0; i<frequencies.size(); i++)
     {
-        envelopes[i].frequency = CalcFrequency(3, (float)i);
+        frequencies[i] = CalcFrequency(3, (float)i);
     }
 }
 
@@ -173,14 +176,30 @@ void AudioLab::Key(int keyCode, int action)
     {
         if(keyCode == keys[i])
         {
-            if(action==1) 
+            if(action==1)
             {
-                envelopes[i].Press(sound->GetTime());
+                notes.push_back(
+                    Note(sound->GetTime(), frequencies[i], keyCode)
+                );
             }
             else if(action==0)
             {
-                envelopes[i].Release(sound->GetTime());
-            }   
+                for(int k=0; k<notes.size(); k++)
+                {
+                    if(notes[k].keyPressed==keyCode)
+                    {
+                        notes[k].Release(sound->GetTime());
+                    }
+                }
+            }
+            // if(action==1) 
+            // {
+            //     envelopes[i].Press(sound->GetTime());
+            // }
+            // else if(action==0)
+            // {
+            //     envelopes[i].Release(sound->GetTime());
+            // }   
         }
     }
 }

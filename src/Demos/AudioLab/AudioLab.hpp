@@ -1,6 +1,7 @@
 #pragma once
 #include "../Demo.hpp"
 #include <array>
+#include <vector>
 
 
 template<class T>
@@ -11,8 +12,6 @@ double HertzToRadians(double hertz);
 
 struct Envelope
 {
-    double phase=0;
-    double frequency = 0;
     double attack;
     double decay;
     double release;
@@ -20,9 +19,9 @@ struct Envelope
     double amplitude;
     double startAmplitude;
 
-    double triggerOnTime;
-    double triggerOffTime;
-    bool noteDown;
+    // double triggerOnTime;
+    // double triggerOffTime;
+    // bool noteDown;
 
     Envelope()
     {
@@ -31,29 +30,20 @@ struct Envelope
         startAmplitude = 1.0;
         amplitude = 0.0;
         release = 1;
-        triggerOnTime = 0.0;
-        triggerOffTime = 0.0;
-        noteDown=false;
     }
 
-    void Press(double time)
-    {
-        triggerOnTime=time;
-        noteDown=true;
-    }
 
-    void Release(double time)
-    {
-        triggerOffTime = time;
-        noteDown=false;
-    }
 
-    double GetAmplitude(double time)
+    double GetAmplitude(double time, double startTime, double endTime, bool &finished)
     {
+        finished=false;
+
         double result = 0.0;
-        double lifeTime = time - triggerOnTime;
+        double lifeTime = time - startTime;
 
-        if(noteDown)
+        bool notePressed = endTime==-1;
+
+        if(notePressed)
         {
             //Attack
             if(lifeTime <= attack)
@@ -76,7 +66,8 @@ struct Envelope
         else
         {
             //Release
-            result = ((time - triggerOffTime) / release) * (0.0 - amplitude) + amplitude;
+            result = ((time - endTime) / release) * (0.0 - amplitude) + amplitude;
+            if((time - endTime) / release > 1) finished=true;
         }
 
         if(result <= 0.0001)
@@ -94,6 +85,8 @@ struct Instrument
     double volume;
     Envelope envelope;
 
+    
+
     virtual double sound(double time, double frequency)=0;
 };
 
@@ -107,8 +100,6 @@ struct Bell : public Instrument
         envelope.startAmplitude = 1.0;
         envelope.amplitude = 0.0;
         envelope.release = 1;
-        envelope.triggerOnTime = 0.0;
-        envelope.triggerOffTime = 0.0;
     }
 
     double sound(double time, double frequency)
@@ -122,9 +113,45 @@ struct Bell : public Instrument
     }
 };
 
-struct note
+struct Harmonica : public Instrument
+{
+    Harmonica()
+    {
+        envelope = {};
+        envelope.attack = 0.2f;
+        envelope.decay = 0.1f;
+        envelope.startAmplitude = 1.0;
+        envelope.amplitude = 1.0;
+        envelope.release = 0.2;
+    }
+
+    double sound(double time, double frequency)
+    {
+        double wave = 0;
+        wave += 1.0 * GetWave(frequency, 1, time, 0.001, 5);
+        wave += 0.5 * GetWave(frequency * 1.5, 1, time);
+        wave += 0.25 * GetWave(frequency * 2, 1, time);
+        wave += 0.05 * GetWave(frequency, 5, time);
+
+        return wave;
+    }
+};
+
+struct Note
 {
     Instrument *instrument;
+    double startTime=0;
+    double endTime=-1;
+    double frequency;
+
+    int keyPressed;
+    
+    Note(double time, double frequency, int keyPressed) : startTime(time), frequency(frequency), keyPressed(keyPressed), endTime(-1) {}
+
+    void Release(double time)
+    {
+        endTime=time;
+    }
 };
 
 class AudioLab : public Demo {
@@ -152,7 +179,7 @@ public :
     double Noise(double t);
 
     
-    std::array<Envelope, 12> envelopes;
+    // std::array<Envelope, 12> envelopes;
     std::array<int, 12> keys = 
     {
        90, // A
@@ -168,6 +195,8 @@ public :
        77, // G
        44 // G#
     };
+    std::array<double, 12> frequencies;
+    std::vector<Note> notes;
     
 
     int sampleRate = 44100;
