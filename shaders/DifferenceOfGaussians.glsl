@@ -17,9 +17,12 @@ void main()
     ivec2 pixelCoord = ivec2 ( gl_GlobalInvocationID.xy );
     ivec2 imgSize = imageSize(textureIn);
 
+
     int halfSize = int(floor( float(size) /2.0f));
     float inverseSize = 1.0f / float(size * size);
-    vec3 color = vec3(0,0,0);
+
+    float edge=0;
+    
     int x=0;
     for(int xx = pixelCoord.x - halfSize; xx <= pixelCoord.x + halfSize; xx++)
     {
@@ -37,10 +40,14 @@ void main()
             float weight = 1.0f / float(size * size);
             weight = kernel[flatInx];
             // weight = 1;
-            color += imageLoad(textureIn, samplePos).rgb * weight;
+            vec3 pixelColor = imageLoad(textureIn, samplePos).rgb;
+            float grayScale = (pixelColor.r + pixelColor.g + pixelColor.b) * 0.333333;
+            edge += grayScale * weight;
             y++;
         }
         x++;
     }
+
+    vec3 color = vec3(edge);
     imageStore ( textureOut , pixelCoord , vec4(color, 0));
 }

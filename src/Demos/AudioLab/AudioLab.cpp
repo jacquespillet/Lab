@@ -15,28 +15,6 @@
 //https://blog.demofox.org/diy-synthesizer/
 
 float CalcFrequency(float fOctave,float fNote)
-/*
-    Calculate the frequency of any note!
-    frequency = 440×(2^(n/12))
- 
-    N=0 is A4
-    N=1 is A#4
-    etc...
- 
-    notes go like so...
-    0  = A  - z
-    1  = A# - s
-    2  = B  - x
-    3  = C  - c
-    4  = C# - f
-    5  = D  - v
-    6  = D# - g
-    7  = E  - b
-    8  = F  - n
-    9  = F# - j
-    10 = G  - m
-    11 = G# - k
-*/
 {
     return (float)(440*pow(2.0,((double)((fOctave-4)*12+fNote))/12.0));
 }
@@ -45,7 +23,6 @@ double HertzToRadians(double hertz)
 {
     return hertz * 2.0f * PI;
 }
-
 
 double Oscillator(void *objectPointer, double time)
 {
@@ -106,8 +83,6 @@ double AudioLab::Noise(double time)
         
         bool finished=false;
         double envelopeAmplitude = instrument->envelope.GetAmplitude(time, notes[i].startTime, notes[i].endTime, finished);
-
-
         
         result += wave * envelopeAmplitude * weight;
     }
@@ -139,12 +114,7 @@ void AudioLab::Process()
 }
 
 void AudioLab::RenderGUI() {
-    // ImGui::DragFloat("Frequency", &frequency);
     ImGui::DragFloat("Amplitude", &amplitude, 0.01f, 0, 1);
-    
-    // ImGui::DragFloat("LFOAmplitude", &LFOAmplitude, 0.01f, 0, 1);
-    // ImGui::DragFloat("LFOFrequency", &LFOFrequency, 0.01f, 0, 10);
-
     ImGui::Combo("Oscillator", &type, "Sine\0Square\0Triangle\0Saw0\0Saw1\0Random\0\0");
 }
 
@@ -191,15 +161,7 @@ void AudioLab::Key(int keyCode, int action)
                         notes[k].Release(sound->GetTime());
                     }
                 }
-            }
-            // if(action==1) 
-            // {
-            //     envelopes[i].Press(sound->GetTime());
-            // }
-            // else if(action==0)
-            // {
-            //     envelopes[i].Release(sound->GetTime());
-            // }   
+            } 
         }
     }
 }

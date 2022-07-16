@@ -189,6 +189,56 @@ struct GaussianBlur : public ImageProcess
     bool shouldRecalculateKernel=true;
 };
 
+struct LaplacianOfGaussian : public ImageProcess
+{
+    LaplacianOfGaussian(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+
+    void RecalculateKernel();
+    int size=9;
+    float sigma=1.0f;
+    int maxSize = 257;
+    std::vector<float> kernel;
+    GLuint kernelBuffer;
+
+    bool shouldRecalculateKernel=true;
+};
+
+struct DifferenceOfGaussians : public ImageProcess
+{
+    DifferenceOfGaussians(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+
+    void RecalculateKernel();
+    int size=9;
+    float sigma1=1.0f;
+    float sigma2=3.0f;
+    int maxSize = 257;
+    std::vector<float> kernel;
+    GLuint kernelBuffer;
+
+    bool shouldRecalculateKernel=true;
+};
+
+struct CannyEdgeDetector : public ImageProcess
+{
+    CannyEdgeDetector(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+
+    void RecalculateKernel();
+    int size=9;
+    float sigma1=1.0f;
+    float sigma2=3.0f;
+    int maxSize = 257;
+    std::vector<float> kernel;
+    GLuint kernelBuffer;
+
+    bool shouldRecalculateKernel=true;
+};
+
 struct ArbitraryFilter : public ImageProcess
 {
     ArbitraryFilter(bool enabled=true);
@@ -214,6 +264,27 @@ struct GammaCorrection : public ImageProcess
     void SetUniforms() override;
     bool RenderGui() override;
     float gamma=2.2f;
+};
+
+struct Gradient : public ImageProcess
+{
+    Gradient(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+
+    enum class RenderMode
+    {
+        Magnitude=0,
+        GradientX=1,
+        GradientY=2,
+        GradientXY=3,
+        angle=4
+    } renderMode = RenderMode::Magnitude;
+
+    float minMag = 0;
+    float maxMag = 1;
+    float angleRange = PI;
+    float angle = 0;
 };
 
 struct Equalize : public ImageProcess

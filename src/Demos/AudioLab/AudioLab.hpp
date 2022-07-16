@@ -19,10 +19,6 @@ struct Envelope
     double amplitude;
     double startAmplitude;
 
-    // double triggerOnTime;
-    // double triggerOffTime;
-    // bool noteDown;
-
     Envelope()
     {
         attack = 0.01f;
@@ -203,9 +199,6 @@ public :
     double timeStep;
 
     Instrument * instrument = nullptr;
-    // float LFOFrequency=5.0f;
-    // float LFOAmplitude = 0.1f;
-
 private:
     olcNoiseMaker<short>* sound;
 };

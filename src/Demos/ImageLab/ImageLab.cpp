@@ -749,6 +749,36 @@ bool MinMaxFilter::RenderGui()
 
 //
 //------------------------------------------------------------------------
+Gradient::Gradient(bool enabled) : ImageProcess("Gradient", "shaders/Gradient.glsl", enabled)
+{
+
+}
+
+void Gradient::SetUniforms()
+{
+    glUniform1i(glGetUniformLocation(shader, "renderMode"), (int)renderMode);
+    
+    glUniform1f(glGetUniformLocation(shader, "minMag"), minMag);
+    glUniform1f(glGetUniformLocation(shader, "maxMag"), maxMag);
+    glUniform1f(glGetUniformLocation(shader, "angleRange"), angleRange);
+    glUniform1f(glGetUniformLocation(shader, "filterAngle"), angle);
+}
+
+bool Gradient::RenderGui()
+{
+    bool changed=false;
+    changed |= ImGui::Combo("Output ", (int*)&renderMode, "Magnitude\0GradientX\0GradientY\0GradientXY\0Angle\0\0");
+
+    changed |= ImGui::DragFloatRange2("Magnitude Threshold", &minMag, &maxMag, 0.01f, 0, 1);
+    changed |= ImGui::SliderFloat("Angle Range", &angleRange, 0, PI);
+    changed |= ImGui::SliderFloat("Angle", &angle, 0, PI);
+    //changed |= ImGui::DragFloatRange2("Angle Threshold", &minAngle, &maxAngle, 0.01f, 0, PI);
+    return changed;
+}
+//
+
+//
+//------------------------------------------------------------------------
 GaussianBlur::GaussianBlur(bool enabled) : ImageProcess("GaussianBlur", "shaders/GaussianBlur.glsl", enabled)
 {
     kernel.resize(maxSize * maxSize);
@@ -808,6 +838,227 @@ bool GaussianBlur::RenderGui()
     shouldRecalculateKernel |= ImGui::SliderInt("Size", &size, 1, maxSize);
     shouldRecalculateKernel |= ImGui::SliderFloat("Sigma", &sigma, 1, 10);
 
+    changed |= shouldRecalculateKernel;
+    return changed;
+}
+//
+
+//
+//------------------------------------------------------------------------
+LaplacianOfGaussian::LaplacianOfGaussian(bool enabled) : ImageProcess("LaplacianOfGaussian", "shaders/LaplacianOfGaussian.glsl", enabled)
+{
+    kernel.resize(maxSize * maxSize);
+    glGenBuffers(1, (GLuint*)&kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+}
+
+void LaplacianOfGaussian::RecalculateKernel()
+{
+    int halfSize = (int)std::floor(size / 2.0f);
+    float sigma2 = sigma*sigma;
+    float s = 2.0f * sigma2;
+    float sum = 0.0f;
+    
+    for (int x = -halfSize; x <= halfSize; x++) {
+        for (int y = -halfSize; y <= halfSize; y++) {
+            int flatInx = (y + halfSize) * size + (x + halfSize);
+            float x2 = (float)(x*x);
+            float y2 = (float)(y*y);
+            
+            float a = -1 / (PI * sigma2 * sigma2);
+            float b = 1 - (x2 + y2) /s;
+            float c = exp(-(x2 + y2) / s);
+            // float a = (x2 + y2 - s) / (sigma2 * sigma2);
+			kernel[flatInx] = (a * b * c);
+
+            sum += kernel[flatInx];
+        }
+    }
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    shouldRecalculateKernel=false;
+}
+
+void LaplacianOfGaussian::SetUniforms()
+{
+    if(shouldRecalculateKernel) RecalculateKernel();
+
+    glUniform1i(glGetUniformLocation(shader, "size"), size);
+    
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+}
+
+bool LaplacianOfGaussian::RenderGui()
+{
+    bool changed=false;
+    shouldRecalculateKernel |= ImGui::SliderInt("Size", &size, 1, maxSize);
+    shouldRecalculateKernel |= ImGui::SliderFloat("Sigma", &sigma, 0, 2);
+
+    changed |= shouldRecalculateKernel;
+    return changed;
+}
+//
+
+//
+//------------------------------------------------------------------------
+DifferenceOfGaussians::DifferenceOfGaussians(bool enabled) : ImageProcess("DifferenceOfGaussians", "shaders/DifferenceOfGaussians.glsl", enabled)
+{
+    kernel.resize(maxSize * maxSize);
+    glGenBuffers(1, (GLuint*)&kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+}
+
+void DifferenceOfGaussians::RecalculateKernel()
+{
+    int halfSize = (int)std::floor(size / 2.0f);
+
+    std::vector<float> kernel1(size * size);
+    {
+        float s = 2.0f * sigma1;
+        for (int x = -halfSize; x <= halfSize; x++) {
+            for (int y = -halfSize; y <= halfSize; y++) {
+                int flatInx = (y + halfSize) * size + (x + halfSize);
+                float x2 = (float)(x*x);
+                float y2 = (float)(y*y);
+                double num = (exp(-(x2+y2) / s));
+                double denom = (PI * s);
+                kernel1[flatInx] =  (float)(num / denom);
+            }
+        }
+    }
+
+    std::vector<float> kernel2(size * size);
+    {
+       float s = 2.0f * sigma2;
+       for (int x = -halfSize; x <= halfSize; x++) {
+            for (int y = -halfSize; y <= halfSize; y++) {
+                int flatInx = (y + halfSize) * size + (x + halfSize);
+                float x2 = (float)(x*x);
+                float y2 = (float)(y*y);
+                double num = (exp(-(x2+y2) / s));
+                double denom = (PI * s);
+                kernel2[flatInx] =  (float)(num / denom);
+            }
+        }
+    }
+
+    for(int i=0; i<size * size; i++)
+    {
+        kernel[i] = kernel2[i]-kernel1[i];
+    }
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    shouldRecalculateKernel=false;
+}
+
+void DifferenceOfGaussians::SetUniforms()
+{
+    if(shouldRecalculateKernel) RecalculateKernel();
+
+    glUniform1i(glGetUniformLocation(shader, "size"), size);
+    
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+}
+
+bool DifferenceOfGaussians::RenderGui()
+{
+    bool changed=false;
+    shouldRecalculateKernel |= ImGui::SliderInt("Size", &size, 1, maxSize);
+    shouldRecalculateKernel |= ImGui::SliderFloat("Sigma", &sigma1, 0, 10);
+    sigma2 = sigma1*2;
+    changed |= shouldRecalculateKernel;
+    return changed;
+}
+//
+
+//
+//------------------------------------------------------------------------
+CannyEdgeDetector::CannyEdgeDetector(bool enabled) : ImageProcess("CannyEdgeDetector", "shaders/CannyEdgeDetector.glsl", enabled)
+{
+    kernel.resize(maxSize * maxSize);
+    glGenBuffers(1, (GLuint*)&kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+}
+
+void CannyEdgeDetector::RecalculateKernel()
+{
+    int halfSize = (int)std::floor(size / 2.0f);
+
+    std::vector<float> kernel1(size * size);
+    {
+        float s = 2.0f * sigma1;
+        for (int x = -halfSize; x <= halfSize; x++) {
+            for (int y = -halfSize; y <= halfSize; y++) {
+                int flatInx = (y + halfSize) * size + (x + halfSize);
+                float x2 = (float)(x*x);
+                float y2 = (float)(y*y);
+                double num = (exp(-(x2+y2) / s));
+                double denom = (PI * s);
+                kernel1[flatInx] =  (float)(num / denom);
+            }
+        }
+    }
+
+    std::vector<float> kernel2(size * size);
+    {
+       float s = 2.0f * sigma2;
+       for (int x = -halfSize; x <= halfSize; x++) {
+            for (int y = -halfSize; y <= halfSize; y++) {
+                int flatInx = (y + halfSize) * size + (x + halfSize);
+                float x2 = (float)(x*x);
+                float y2 = (float)(y*y);
+                double num = (exp(-(x2+y2) / s));
+                double denom = (PI * s);
+                kernel2[flatInx] =  (float)(num / denom);
+            }
+        }
+    }
+
+    for(int i=0; i<size * size; i++)
+    {
+        kernel[i] = kernel2[i]-kernel1[i];
+    }
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    shouldRecalculateKernel=false;
+}
+
+void CannyEdgeDetector::SetUniforms()
+{
+    if(shouldRecalculateKernel) RecalculateKernel();
+
+    glUniform1i(glGetUniformLocation(shader, "size"), size);
+    
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+}
+
+bool CannyEdgeDetector::RenderGui()
+{
+    bool changed=false;
+    shouldRecalculateKernel |= ImGui::SliderInt("Size", &size, 1, maxSize);
+    shouldRecalculateKernel |= ImGui::SliderFloat("Sigma", &sigma1, 0, 10);
+    sigma2 = sigma1*2;
     changed |= shouldRecalculateKernel;
     return changed;
 }
@@ -1184,7 +1435,7 @@ void ImageLab::Load() {
 
 
     imageProcessStack.Resize(texture.width, texture.height);
-    // imageProcessStack.AddProcess(new Transform(true));
+    imageProcessStack.AddProcess(new CannyEdgeDetector(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
     // imageProcessStack.AddProcess(new Equalize(true));
