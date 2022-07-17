@@ -78,20 +78,20 @@ double AudioLab::Noise(double time)
 	for(int i = (int)notes.size() - 1; i >= 0; i--)
     {
 
-        double wave = instrument->sound(notes[i].frequency, time);
+        double wave = notes[i].instrument->sound(notes[i].frequency, time);
         
         bool finished=false;
-        double envelopeAmplitude = instrument->envelope.GetAmplitude(time, notes[i].startTime, notes[i].endTime, finished);
+        double envelopeAmplitude = notes[i].instrument->envelope.GetAmplitude(time, notes[i].startTime, notes[i].endTime, finished);
         
         result += wave * envelopeAmplitude * weight;
     }
     
     //Piano note
     {
-        double wave = instrument->sound(piano.note.frequency, time);
+        double wave = piano.instrument->sound(piano.note.frequency, time);
             
         bool finished=false;
-        double envelopeAmplitude = instrument->envelope.GetAmplitude(time, piano.note.startTime, piano.note.endTime, finished);
+        double envelopeAmplitude = piano.instrument->envelope.GetAmplitude(time, piano.note.startTime, piano.note.endTime, finished);
         
         result += wave * envelopeAmplitude;
     }
@@ -117,7 +117,10 @@ double AudioLab::Noise(double time)
 }
 
 AudioLab::AudioLab() {
-    instrument = new Harmonica();
+    
+    piano.instrument = new Harmonica();
+    
+    
     std::vector<std::string> devices = olcNoiseMaker<short>::Enumerate();
     sound = new olcNoiseMaker<short>(devices[0], sampleRate, 1, 8, 512);
     timeStep = 1.0 / (double)sampleRate;
@@ -158,9 +161,9 @@ void AudioLab::PlaySequencer()
         // double weight = 1.0 / recordedNotes.size();
         for (auto note : recordedNotes)
         {
-            double wave = instrument->sound(note.second.frequency, time);
+            double wave = note.second.instrument->sound(note.second.frequency, time);
             bool finished=false;
-            double envelopeAmplitude = instrument->envelope.GetAmplitude(time, note.second.startTime, note.second.endTime, finished);
+            double envelopeAmplitude = note.second.instrument->envelope.GetAmplitude(time, note.second.startTime, note.second.endTime, finished);
             result += wave * envelopeAmplitude;         
         }
         
@@ -193,7 +196,10 @@ void AudioLab::RenderGUI() {
     ImGui::DragFloat("Duration", &sequencer.recordDuration, 0.1f, 1, 500);
     ImGui::Separator();
     
-    ImGui::DragFloat("Zoom", &sequencer.zoomX, 0.1f, 0.1f, 10000);
+    ImGui::PushID(0);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX()+ piano.keysWidth);
+    ImGui::DragFloat("", &sequencer.zoomX, 0.1f, 0.1f, 10000, "Zoom (Drag)");
+    ImGui::PopID();
 
     int numCellsVisible = (int)((sequencer.recordDuration / sequencer.zoomX) / sequencer.cellDuration);
     int totalCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
@@ -201,7 +207,7 @@ void AudioLab::RenderGUI() {
 
     int difference = totalCells - numCellsVisible;
 
-    ImGui::PushID(0);
+    ImGui::PushID(1);
     ImGui::SetNextItemWidth(sequencer.width);
     ImGui::SetCursorPosX(ImGui::GetCursorPosX()+ piano.keysWidth);
     ImGui::SliderInt("", &sequencer.startX, 0, difference, "");
@@ -385,7 +391,7 @@ void AudioLab::LeftClickDown() {
         int hash = (int)(sequencer.hoveredCellY * numCells + correctedXPosition);
         if (recordedNotes.find(hash) == recordedNotes.end())
         {
-            recordedNotes[hash] = Note(startTime, endTime, key);
+            recordedNotes[hash] = Note(startTime, endTime, key, piano.instrument);
         }
         else
         {
@@ -421,7 +427,7 @@ void AudioLab::Key(int keyCode, int action)
             if(action==1)
             {
                 notes.push_back(
-                    Note(sound->GetTime(), frequencies[i], keyCode)
+                    Note(sound->GetTime(), frequencies[i], keyCode, piano.instrument)
                 );
             }
             else if(action==0)

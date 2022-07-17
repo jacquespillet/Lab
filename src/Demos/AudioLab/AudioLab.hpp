@@ -151,11 +151,12 @@ struct Note
     
     Note(){}
     
-    Note(double startTime, double endTime, float key) : frequency(frequency), startTime(startTime), endTime(endTime), key(key){
+    Note(double startTime, double endTime, float key, Instrument *instrument) : frequency(frequency), startTime(startTime), endTime(endTime), key(key), instrument(instrument)
+    {
         frequency = CalcFrequency(3, key);
     }
 
-    Note(double time, double frequency, int keyPressed) : frequency(frequency), keyPressed(keyPressed), endTime(-1) 
+    Note(double time, double frequency, int keyPressed, Instrument *instrument) : frequency(frequency), keyPressed(keyPressed), endTime(-1), instrument(instrument)
     {
         Press(time);
     }
@@ -210,6 +211,8 @@ public :
         int currentKey;
         
         Note note;
+        
+        Instrument * instrument = nullptr;
     } piano;
 
     struct
@@ -260,7 +263,6 @@ public :
     int sampleRate = 44100;
     double timeStep;
 
-    Instrument * instrument = nullptr;
 private:
     olcNoiseMaker<short>* sound;
 };
