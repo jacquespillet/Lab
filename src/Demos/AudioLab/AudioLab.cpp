@@ -89,10 +89,10 @@ double AudioLab::Noise(double time)
     
     //Piano note
     {
-        double wave = instrument->sound(pianoNote.frequency, time);
+        double wave = instrument->sound(piano.note.frequency, time);
             
         bool finished=false;
-        double envelopeAmplitude = instrument->envelope.GetAmplitude(time, pianoNote.startTime, pianoNote.endTime, finished);
+        double envelopeAmplitude = instrument->envelope.GetAmplitude(time, piano.note.startTime, piano.note.endTime, finished);
         
         result += wave * envelopeAmplitude * weight;
     }
@@ -123,10 +123,11 @@ void AudioLab::Load() {
     tci.srgb=true;
     tci.minFilter = GL_LINEAR;
     tci.magFilter = GL_LINEAR;
-    keysRenderTarget = GL_TextureFloat(256, 2048, tci);
-    keysTexture = GL_Texture("resources/AudioLab/keys.png", tci);
+    tci.flip=false;
+    piano.keysRenderTarget = GL_TextureFloat(256, 2048, tci);
+    piano.keysTexture = GL_Texture("resources/AudioLab/keys.png", tci);
 
-    CreateComputeShader("shaders/AudioLab/keys.glsl", &keysShader);
+    CreateComputeShader("shaders/AudioLab/keys.glsl", &piano.keysShader);
 }
 
 void AudioLab::Process()
@@ -138,15 +139,15 @@ void AudioLab::RenderGUI() {
     ImGui::DragFloat("Amplitude", &amplitude, 0.01f, 0, 1);
     ImGui::Combo("Oscillator", &type, "Sine\0Square\0Triangle\0Saw0\0Saw1\0Random\0\0");
 
-    ImGui::SetNextWindowSize(ImVec2(keysWidth, keysHeight), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(piano.keysWidth, piano.keysHeight), ImGuiCond_Appearing);
     ImGui::Begin("Keys", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar);
-    ImGui::Image((ImTextureID)keysRenderTarget.glTex, ImVec2(keysWidth, keysHeight));
+    ImGui::Image((ImTextureID)piano.keysRenderTarget.glTex, ImVec2(piano.keysWidth, piano.keysHeight));
     ImVec2 windowSize = ImGui::GetWindowSize();
-    keysWidth = windowSize.x;
-    keysHeight = windowSize.y;
+    piano.keysWidth = windowSize.x;
+    piano.keysHeight = windowSize.y;
 
     ImVec2 keyWindowPos = ImGui::GetWindowPos();
-    mouseInKeyWindowPos = glm::vec2(mouse.positionX - (int)keyWindowPos.x, mouse.positionY - keyWindowPos.y); 
+    piano.mouseInKeyWindowPos = glm::vec2(mouse.positionX - (int)keyWindowPos.x, mouse.positionY - keyWindowPos.y); 
     
 
 
@@ -156,21 +157,21 @@ void AudioLab::RenderGUI() {
 
 void AudioLab::Render() 
 {
-	glUseProgram(keysShader);
+	glUseProgram(piano.keysShader);
 	
-    glUniform1i(glGetUniformLocation(keysShader, "textureOut"), 0); //program must be active
-    glBindImageTexture(0, keysRenderTarget.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    glUniform1i(glGetUniformLocation(piano.keysShader, "textureOut"), 0); //program must be active
+    glBindImageTexture(0, piano.keysRenderTarget.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
     
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, keysTexture.glTex);
-    glUniform1i(glGetUniformLocation(keysShader, "keysTexture"), 0);
+    glBindTexture(GL_TEXTURE_2D, piano.keysTexture.glTex);
+    glUniform1i(glGetUniformLocation(piano.keysShader, "keysTexture"), 0);
 
-    glUniform1i(glGetUniformLocation(keysShader, "mousePressed"), (int)mouse.leftPressed);
-    glUniform1i(glGetUniformLocation(keysShader, "pressedKey"), currentKey);
-    glUniform2fv(glGetUniformLocation(keysShader, "mousePosition"), 1, glm::value_ptr(mouseInKeyWindowPos));
-    glUniform2f(glGetUniformLocation(keysShader, "keysWindowSize"), (float)keysWidth, (float)keysHeight);
+    glUniform1i(glGetUniformLocation(piano.keysShader, "mousePressed"), (int)mouse.leftPressed);
+    glUniform1i(glGetUniformLocation(piano.keysShader, "pressedKey"), piano.currentKey);
+    glUniform2fv(glGetUniformLocation(piano.keysShader, "mousePosition"), 1, glm::value_ptr(piano.mouseInKeyWindowPos));
+    glUniform2f(glGetUniformLocation(piano.keysShader, "keysWindowSize"), (float)piano.keysWidth, (float)piano.keysHeight);
     
-    glDispatchCompute((keysRenderTarget.width / 32) + 1, (keysRenderTarget.height / 32) + 1, 1);
+    glDispatchCompute((piano.keysRenderTarget.width / 32) + 1, (piano.keysRenderTarget.height / 32) + 1, 1);
 	glUseProgram(0);
     glMemoryBarrier(GL_ALL_BARRIER_BITS);    
 
@@ -189,17 +190,17 @@ void AudioLab::LeftClickDown() {
     mouse.leftPressed=true;
 
     //Add key
-    currentKey = (int)((mouseInKeyWindowPos.y / keysHeight) * 12.0f);
+    piano.currentKey = (int)((piano.mouseInKeyWindowPos.y / piano.keysHeight) * 12.0f);
 
-    if(mouseInKeyWindowPos.x>0)
+    if(piano.mouseInKeyWindowPos.x>0)
     {
-        pianoNote.frequency = CalcFrequency(3, (float)currentKey);
-        pianoNote.Press(sound->GetTime());
+        piano.note.frequency = CalcFrequency(3, (float)piano.currentKey);
+        piano.note.Press(sound->GetTime());
     }
 }
 
 void AudioLab::LeftClickUp() {
-    pianoNote.Release(sound->GetTime());
+    piano.note.Release(sound->GetTime());
     
     mouse.leftPressed=false;
 }

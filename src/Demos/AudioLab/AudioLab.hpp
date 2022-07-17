@@ -193,14 +193,17 @@ public :
     double Noise(double t);
 
     //Renderer
-    GL_TextureFloat keysRenderTarget;
-    GL_Texture keysTexture;
-    GLint keysShader;
-    float keysHeight = 512;
-    float keysWidth = 64;
-    glm::vec2 mouseInKeyWindowPos;
-    
-    int currentKey;
+    struct {
+        GL_TextureFloat keysRenderTarget;
+        GL_Texture keysTexture;
+        GLint keysShader;
+        float keysHeight = 512;
+        float keysWidth = 64;
+        glm::vec2 mouseInKeyWindowPos;
+        int currentKey;
+        
+        Note note;
+    } piano;
     
     // std::array<Envelope, 12> envelopes;
     std::array<int, 12> keys = 
@@ -221,7 +224,6 @@ public :
     std::array<double, 12> frequencies;
     std::vector<Note> notes;
 
-    Note pianoNote;
     
 
     int sampleRate = 44100;

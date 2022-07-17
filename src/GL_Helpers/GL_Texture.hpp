@@ -100,10 +100,11 @@ public:
         glGenTextures(1, &glTex);
         glBindTexture(GL_TEXTURE_2D, glTex);
 
+        
         if(createInfo.flip) stbi_set_flip_vertically_on_load(true);  
         // data = stbi_loadf(filename.c_str(), &width, &height, &nChannels, 0);
-        
         data = stbi_load(filename.c_str(), &width, &height, &nChannels, 4);
+        if(createInfo.flip) stbi_set_flip_vertically_on_load(false);  
         
         
         if (data)
@@ -120,7 +121,8 @@ public:
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, createInfo.minFilter);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, createInfo.magFilter);
         if(createInfo.generateMipmaps) glGenerateMipmap(GL_TEXTURE_2D);
-    
+
+        
 
         glBindTexture(GL_TEXTURE_2D, 0);
         loaded = true;        
