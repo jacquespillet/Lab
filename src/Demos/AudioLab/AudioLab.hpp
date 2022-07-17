@@ -2,6 +2,7 @@
 #include "../Demo.hpp"
 #include <array>
 #include <vector>
+#include <unordered_map>
 #include "GL_Helpers/GL_Texture.hpp"
 #include "GL_Helpers/GL_Shader.hpp"
 #include "GL_Helpers/GL_Mesh.hpp"
@@ -11,6 +12,9 @@ class olcNoiseMaker;
 
 double GetWave(double phase, int waveType, double time, double LFOAmplitude=0, double LFOFrequency=0);
 double HertzToRadians(double hertz);
+
+float CalcFrequency(float fOctave,float fNote);
+
 
 struct Envelope
 {
@@ -39,7 +43,7 @@ struct Envelope
         double result = 0.0;
         double lifeTime = time - startTime;
 
-        bool notePressed = endTime==-1;
+        bool notePressed = (time < endTime);
 
         if(notePressed)
         {
@@ -138,13 +142,19 @@ struct Harmonica : public Instrument
 struct Note
 {
     Instrument *instrument;
-    double startTime=0;
+    double startTime=-1;
     double endTime=-1;
     double frequency;
+    float key;
 
     int keyPressed;
     
     Note(){}
+    
+    Note(double startTime, double endTime, float key) : frequency(frequency), startTime(startTime), endTime(endTime), key(key){
+        frequency = CalcFrequency(3, key);
+    }
+
     Note(double time, double frequency, int keyPressed) : frequency(frequency), keyPressed(keyPressed), endTime(-1) 
     {
         Press(time);
@@ -153,7 +163,7 @@ struct Note
     void Press(double time)
     {
         startTime = time;
-        endTime=-1;
+        endTime=DBL_MAX;
     }
     void Release(double time)
     {
@@ -188,7 +198,7 @@ public :
 
     // float frequency=440.0f;
     int type=0;
-    float amplitude = 1.0f;
+    float amplitude = 0.1f;
 
     double Noise(double t);
 
@@ -212,11 +222,18 @@ public :
 
         int currentCellX;
         int currentCellY;
+        
+        float recordDuration=5;
     } sequencer;
     
     float windowHeight=512;
-    float recordLength=20;
     int numNotes=12;
+
+    std::vector<double> soundBuffer;
+    bool playing=false;
+    uint64_t playingSample=0;
+
+    std::unordered_map<uint32_t, Note> recordedNotes;
 
     // std::array<Envelope, 12> envelopes;
     std::array<int, 12> keys = 
