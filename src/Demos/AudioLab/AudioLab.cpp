@@ -69,119 +69,31 @@ double GetWave(double frequency, int waveType, double time, double LFOAmplitude,
     return wave;
 }
 
-double AudioLab::Noise(double time)
+void Clip::RenderGUI()
 {
+    ImGuiIO& io = ImGui::GetIO();
     
-    double result=0;
-    double weight = 1.0f / (double)notes.size();
-
-	for(int i = (int)notes.size() - 1; i >= 0; i--)
-    {
-
-        double wave = notes[i].instrument->sound(notes[i].frequency, time);
-        
-        bool finished=false;
-        double envelopeAmplitude = notes[i].instrument->envelope.GetAmplitude(time, notes[i].startTime, notes[i].endTime, finished);
-        
-        result += wave * envelopeAmplitude * weight;
-    }
+    //Render piano
+	glUseProgram(piano.keysShader);
+	
+    glUniform1i(glGetUniformLocation(piano.keysShader, "textureOut"), 0); //program must be active
+    glBindImageTexture(0, piano.keysRenderTarget.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
     
-    //Piano note
-    {
-        double wave = piano.instrument->sound(piano.note.frequency, time);
-            
-        bool finished=false;
-        double envelopeAmplitude = piano.instrument->envelope.GetAmplitude(time, piano.note.startTime, piano.note.endTime, finished);
-        
-        result += wave * envelopeAmplitude;
-    }
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, piano.keysTexture.glTex);
+    glUniform1i(glGetUniformLocation(piano.keysShader, "keysTexture"), 0);
+
+    glUniform1i(glGetUniformLocation(piano.keysShader, "mousePressed"), (int)io.MouseDown[0]);
+    glUniform1i(glGetUniformLocation(piano.keysShader, "pressedKey"), piano.currentKey);
+    glUniform2fv(glGetUniformLocation(piano.keysShader, "mousePosition"), 1, glm::value_ptr(piano.mousePos));
+    glUniform2f(glGetUniformLocation(piano.keysShader, "keysWindowSize"), (float)piano.keysWidth, (float)windowHeight);
     
-
-
-#if 1
-    if(playing)
-    {
-        if(playingSample > soundBuffer.size()-1) 
-        {
-            playing=false;
-            return 0;
-        }
-        result += soundBuffer[playingSample]; 
-        playingSample++;
-    }
-#endif
-
-    result *= amplitude;
-    result = (std::min)(1.0, (std::max)(-1.0, result));
-    return result;
-}
-
-AudioLab::AudioLab() {
-    
-    piano.instrument = new Harmonica();
-    
-    
-    std::vector<std::string> devices = olcNoiseMaker<short>::Enumerate();
-    sound = new olcNoiseMaker<short>(devices[0], sampleRate, 1, 8, 512);
-    timeStep = 1.0 / (double)sampleRate;
-
-    sound->SetUserFunction(Oscillator, (void*)this);
-
-    for(int i=0; i<frequencies.size(); i++)
-    {
-        frequencies[i] = CalcFrequency(3, (float)i);
-    }
-}
-
-void AudioLab::Load() {
-    TextureCreateInfo tci = {};
-    tci.generateMipmaps =false;
-    tci.srgb=true;
-    tci.minFilter = GL_LINEAR;
-    tci.magFilter = GL_LINEAR;
-    tci.flip=false;
-    piano.keysRenderTarget = GL_TextureFloat(256, 2048, tci);
-    piano.keysTexture = GL_Texture("resources/AudioLab/keys.png", tci);
-
-    CreateComputeShader("shaders/AudioLab/keys.glsl", &piano.keysShader);
-}
-
-
-void AudioLab::PlaySequencer()
-{
-    soundBuffer.clear();
-    soundBuffer.resize((size_t)sampleRate * (size_t)sequencer.recordDuration);
-    double time=0;
-    double deltaTime = 1.0 / sampleRate;
-    for(size_t i=0; i<soundBuffer.size(); i++)
-    {
-        double result=0;
-        
-
-        // double weight = 1.0 / recordedNotes.size();
-        for (auto note : recordedNotes)
-        {
-            double wave = note.second.instrument->sound(note.second.frequency, time);
-            bool finished=false;
-            double envelopeAmplitude = note.second.instrument->envelope.GetAmplitude(time, note.second.startTime, note.second.endTime, finished);
-            result += wave * envelopeAmplitude;         
-        }
-        
-        soundBuffer[i] = result;
-        time += deltaTime;
-    }
-
-    playing=true;
-    playingSample=0;
-}
-
-void AudioLab::RenderGUI() {
-    ImGui::DragFloat("Amplitude", &amplitude, 0.01f, 0, 1);
-    ImGui::Combo("Oscillator", &type, "Sine\0Square\0Triangle\0Saw0\0Saw1\0Random\0\0");
+    glDispatchCompute((piano.keysRenderTarget.width / 32) + 1, (piano.keysRenderTarget.height / 32) + 1, 1);
+	glUseProgram(0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);    
 
     ImGuiStyle& style = ImGui::GetStyle();
     float padding = style.WindowPadding.x;
-
     ImGui::SetNextWindowSize(ImVec2(piano.keysWidth + sequencer.width, windowHeight), ImGuiCond_Appearing);
 
 
@@ -189,9 +101,8 @@ void AudioLab::RenderGUI() {
 
     if(ImGui::Button("Play"))
     {
-        PlaySequencer();
+        FillAudioBuffer();
     }
-
 
     ImGui::DragFloat("Duration", &sequencer.recordDuration, 0.1f, 1, 500);
     ImGui::Separator();
@@ -219,7 +130,7 @@ void AudioLab::RenderGUI() {
     ImGui::SameLine();
 
     //Piano mouse pos
-    piano.mousePos = glm::vec2(mouse.positionX - (int)keyWindowPos.x - padding, mouse.positionY - keyWindowPos.y);
+    piano.mousePos = glm::vec2(io.MousePos.x - (int)keyWindowPos.x - padding, io.MousePos.y - keyWindowPos.y);
     if(piano.mousePos.x < 0 || piano.mousePos.y < 0 || piano.mousePos.x > piano.keysWidth || piano.mousePos.y > windowHeight)
     {
         piano.mousePos = glm::vec2(-1,-1);
@@ -227,7 +138,7 @@ void AudioLab::RenderGUI() {
 
     //Sequencer mouse pos
     ImVec2 sequencePos = ImGui::GetCursorScreenPos();
-    sequencer.mousePos = glm::vec2(mouse.positionX - sequencePos.x, mouse.positionY - sequencePos.y);
+    sequencer.mousePos = glm::vec2(io.MousePos.x - sequencePos.x, io.MousePos.y - sequencePos.y);
     if(sequencer.mousePos.x < 0 || sequencer.mousePos.y < 0 || sequencer.mousePos.x > sequencer.width || sequencer.mousePos.y > windowHeight)
     {
         sequencer.mousePos = glm::vec2(-1,-1);
@@ -261,8 +172,9 @@ void AudioLab::RenderGUI() {
 
     //Vertical lines
     float vertSpacing = sequencer.width/(float)numCellsVisible;
+
+
     int cellsPerSecond = (int)(1.0f / sequencer.cellDuration);
-    
     for(int i=0; i<numCellsVisible; i++)
     {
         float y =canvasPos.y;
@@ -332,52 +244,30 @@ void AudioLab::RenderGUI() {
     }
 
     
-
-
+    if(playing)
+    {
+        double samplesPerCell = (double)sequencer.cellDuration * player->sampleRate;
+        double linePos = (double)(playingSample - sequencer.startX * samplesPerCell)  / (numCellsVisible * samplesPerCell);
+        
+        float x = canvasPos.x + (float)linePos * sequencer.width;
+        float y =canvasPos.y;
+        if(x > canvasPos.x)
+        {
+            draw_list->AddLine(ImVec2(x, y), ImVec2(x, y + windowHeight), IM_COL32(200, 200, 200, 255), 2);
+        }
+    }    
     ImGui::End();
 }
 
-void AudioLab::Render() 
+void Clip::MousePress()
 {
-	glUseProgram(piano.keysShader);
-	
-    glUniform1i(glGetUniformLocation(piano.keysShader, "textureOut"), 0); //program must be active
-    glBindImageTexture(0, piano.keysRenderTarget.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
-    
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, piano.keysTexture.glTex);
-    glUniform1i(glGetUniformLocation(piano.keysShader, "keysTexture"), 0);
-
-    glUniform1i(glGetUniformLocation(piano.keysShader, "mousePressed"), (int)mouse.leftPressed);
-    glUniform1i(glGetUniformLocation(piano.keysShader, "pressedKey"), piano.currentKey);
-    glUniform2fv(glGetUniformLocation(piano.keysShader, "mousePosition"), 1, glm::value_ptr(piano.mousePos));
-    glUniform2f(glGetUniformLocation(piano.keysShader, "keysWindowSize"), (float)piano.keysWidth, (float)windowHeight);
-    
-    glDispatchCompute((piano.keysRenderTarget.width / 32) + 1, (piano.keysRenderTarget.height / 32) + 1, 1);
-	glUseProgram(0);
-    glMemoryBarrier(GL_ALL_BARRIER_BITS);    
-
-}
-
-void AudioLab::Unload() {
-}
-
-
-void AudioLab::MouseMove(float x, float y) {
-    mouse.positionX = x;
-    mouse.positionY = y;
-}
-
-void AudioLab::LeftClickDown() {
-    mouse.leftPressed=true;
-
     //Add key
     piano.currentKey = (int)((piano.mousePos.y / windowHeight) * 12.0f);
 
     if(piano.mousePos.x>0)
     {
         piano.note.frequency = CalcFrequency(3, (float)piano.currentKey);
-        piano.note.Press(sound->GetTime());
+        piano.note.Press(player->sound->GetTime());
     }
 
     int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
@@ -397,19 +287,159 @@ void AudioLab::LeftClickDown() {
         {
             recordedNotes.erase(hash);
         }
-
     }
+}
 
+void Clip::MouseRelease()
+{
+    if(piano.mousePos.x>0)
+    {
+        piano.note.Release(player->sound->GetTime());
+    }
     
 }
 
-void AudioLab::LeftClickUp() {
-    if(piano.mousePos.x>0)
+double Clip::Sound(double time)
+{
+    double result=0;
+    //Piano note
     {
-        piano.note.Release(sound->GetTime());
+        double wave = piano.instrument->sound(piano.note.frequency, time);
+            
+        bool finished=false;
+        double envelopeAmplitude = piano.instrument->envelope.GetAmplitude(time, piano.note.startTime, piano.note.endTime, finished);
+        
+        result += wave * envelopeAmplitude;
     }
     
-    mouse.leftPressed=false;
+
+
+    if(playing)
+    {
+        if(playingSample > soundBuffer.size()-1) 
+        {
+            playing=false;
+            return 0;
+        }
+        result += soundBuffer[playingSample]; 
+        playingSample++;
+    }
+
+    return result;
+}
+
+double AudioLab::Noise(double time)
+{
+    
+    double result=0;
+    double weight = 1.0f / (double)notes.size();
+
+	for(int i = (int)notes.size() - 1; i >= 0; i--)
+    {
+
+        double wave = notes[i].instrument->sound(notes[i].frequency, time);
+        
+        bool finished=false;
+        double envelopeAmplitude = notes[i].instrument->envelope.GetAmplitude(time, notes[i].startTime, notes[i].endTime, finished);
+        
+        result += wave * envelopeAmplitude * weight;
+    }
+    
+    result += synthClip.Sound(time);
+
+
+    result *= audioPlayer.amplitude;
+    result = (std::min)(1.0, (std::max)(-1.0, result));
+    return result;
+}
+
+AudioLab::AudioLab() {
+     
+}
+
+void AudioLab::Load() {
+    
+    synthClip.piano.instrument = new Harmonica();
+    synthClip.player = &audioPlayer;
+    
+    std::vector<std::string> devices = olcNoiseMaker<short>::Enumerate();
+    audioPlayer.sound = new olcNoiseMaker<short>(devices[0], audioPlayer.sampleRate, 1, 8, 512);
+    audioPlayer.timeStep = 1.0 / (double)audioPlayer.sampleRate;
+
+    audioPlayer.sound->SetUserFunction(Oscillator, (void*)this);
+
+    for(int i=0; i<frequencies.size(); i++)
+    {
+        frequencies[i] = CalcFrequency(3, (float)i);
+    }
+
+    TextureCreateInfo tci = {};
+    tci.generateMipmaps =false;
+    tci.srgb=true;
+    tci.minFilter = GL_LINEAR;
+    tci.magFilter = GL_LINEAR;
+    tci.flip=false;
+    synthClip.piano.keysRenderTarget = GL_TextureFloat(256, 2048, tci);
+    synthClip.piano.keysTexture = GL_Texture("resources/AudioLab/keys.png", tci);
+
+    CreateComputeShader("shaders/AudioLab/keys.glsl", &synthClip.piano.keysShader);   
+}
+
+
+void Clip::FillAudioBuffer()
+{
+    soundBuffer.clear();
+    soundBuffer.resize((size_t)player->sampleRate * (size_t)sequencer.recordDuration);
+    double time=0;
+    double deltaTime = 1.0 / player->sampleRate;
+    for(size_t i=0; i<soundBuffer.size(); i++)
+    {
+        double result=0;
+        
+
+        // double weight = 1.0 / recordedNotes.size();
+        for (auto note : recordedNotes)
+        {
+            double wave = note.second.instrument->sound(note.second.frequency, time);
+            bool finished=false;
+            double envelopeAmplitude = note.second.instrument->envelope.GetAmplitude(time, note.second.startTime, note.second.endTime, finished);
+            result += wave * envelopeAmplitude;         
+        }
+        
+        soundBuffer[i] = result;
+        time += deltaTime;
+    }
+
+    playing=true;
+    playingSample=0;
+}
+
+void AudioLab::RenderGUI() {
+    ImGui::DragFloat("Amplitude", &audioPlayer.amplitude, 0.01f, 0, 1);
+    
+    synthClip.RenderGUI();
+
+}
+
+void AudioLab::Render() 
+{
+}
+
+void AudioLab::Unload() {
+}
+
+
+void AudioLab::MouseMove(float x, float y) {
+    mouse.positionX = x;
+    mouse.positionY = y;
+}
+
+void AudioLab::LeftClickDown() {
+    synthClip.MousePress();
+}
+
+void AudioLab::LeftClickUp() {
+    synthClip.MouseRelease();
 }
 
 void AudioLab::RightClickDown() {
@@ -427,7 +457,7 @@ void AudioLab::Key(int keyCode, int action)
             if(action==1)
             {
                 notes.push_back(
-                    Note(sound->GetTime(), frequencies[i], keyCode, piano.instrument)
+                    Note(audioPlayer.sound->GetTime(), frequencies[i], keyCode, synthClip.piano.instrument)
                 );
             }
             else if(action==0)
@@ -436,7 +466,7 @@ void AudioLab::Key(int keyCode, int action)
                 {
                     if(notes[k].keyPressed==keyCode)
                     {
-                        notes[k].Release(sound->GetTime());
+                        notes[k].Release(audioPlayer.sound->GetTime());
                     }
                 }
             } 

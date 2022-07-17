@@ -172,6 +172,67 @@ struct Note
     }
 };
 
+class AudioLab;
+
+struct AudioPlayer
+{
+    float amplitude = 0.1f;
+    int sampleRate = 44100;
+    double timeStep;
+    olcNoiseMaker<short>* sound;
+};
+
+struct Clip
+{
+    struct {
+        GL_TextureFloat keysRenderTarget;
+        GL_Texture keysTexture;
+        GLint keysShader;
+        float keysWidth = 64;
+        glm::vec2 mousePos;
+        int currentKey;
+        
+        Note note;
+        
+        Instrument * instrument = nullptr;
+    } piano;
+
+    //Sequencer
+    struct
+    {
+        float width = 512;
+        glm::vec2 mousePos;
+
+        int hoveredCellX;
+        int hoveredCellY;
+        
+        float cellDuration = 0.1f;
+        float recordDuration=5;
+
+        float zoomX = 1;
+        int startX = 0;
+    } sequencer;
+    
+    float windowHeight=512;
+    int numNotes=12;
+
+    void RenderGUI();
+    void FillAudioBuffer();
+
+    void MousePress();
+    void MouseRelease();
+
+    double Sound(double time);
+
+    std::unordered_map<uint32_t, Note> recordedNotes;
+    std::vector<double> soundBuffer;
+
+    AudioPlayer *player;
+
+    bool playing=false;
+    uint64_t playingSample=0;
+};
+
 class AudioLab : public Demo {
 public : 
     AudioLab();
@@ -195,51 +256,12 @@ public :
         bool leftPressed=false;
     } mouse;
 
-    // float frequency=440.0f;
-    int type=0;
-    float amplitude = 0.1f;
-
     double Noise(double t);
 
-    //Renderer
-    struct {
-        GL_TextureFloat keysRenderTarget;
-        GL_Texture keysTexture;
-        GLint keysShader;
-        float keysWidth = 64;
-        glm::vec2 mousePos;
-        int currentKey;
-        
-        Note note;
-        
-        Instrument * instrument = nullptr;
-    } piano;
+    Clip synthClip;
 
-    struct
-    {
-        float width = 512;
-        glm::vec2 mousePos;
-
-        int hoveredCellX;
-        int hoveredCellY;
-        
-        float cellDuration = 0.1f;
-        float recordDuration=5;
-
-        float zoomX = 1;
-        int startX = 0;
-    } sequencer;
     
-    float windowHeight=512;
-    int numNotes=12;
-
-    std::vector<double> soundBuffer;
-    bool playing=false;
-    uint64_t playingSample=0;
-
-    std::unordered_map<uint32_t, Note> recordedNotes;
-
-    // std::array<Envelope, 12> envelopes;
+    //Used for keyboard input...
     std::array<int, 12> keys = 
     {
        90, // A
@@ -260,9 +282,6 @@ public :
 
     void PlaySequencer();
 
-    int sampleRate = 44100;
-    double timeStep;
-
+    AudioPlayer audioPlayer;
 private:
-    olcNoiseMaker<short>* sound;
 };
