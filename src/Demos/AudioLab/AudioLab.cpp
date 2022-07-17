@@ -303,21 +303,28 @@ void Clip::RenderGUI()
     
     if(sequencer.resizingNote)
     {
+		if (recordedNotes.find(sequencer.resizeNoteHash) == recordedNotes.end()) return;
+
         int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
 
         float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
         float time = ((float)(correctedXPosition) / (float)numCells) * sequencer.recordDuration;
         
-        assert(recordedNotes.find(sequencer.resizeNoteHash) != recordedNotes.end());
-        
+        //assert(recordedNotes.find(sequencer.resizeNoteHash) != recordedNotes.end());
         if(sequencer.resizeNoteDirection > 0)
         {
             recordedNotes[sequencer.resizeNoteHash].endTime = time;
+
         }
         else
         {
             recordedNotes[sequencer.resizeNoteHash].startTime = time;
+        }
+        
+        if(recordedNotes[sequencer.resizeNoteHash].endTime < recordedNotes[sequencer.resizeNoteHash].startTime)
+        {
+            std::swap(recordedNotes[sequencer.resizeNoteHash].endTime, recordedNotes[sequencer.resizeNoteHash].startTime);
         }
         
     }
