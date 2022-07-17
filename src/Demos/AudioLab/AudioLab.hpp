@@ -211,6 +211,10 @@ struct Clip
 
         float zoomX = 1;
         int startX = 0;
+
+        bool resizingNote=false;
+        int resizeNoteHash=-1;
+        float resizeNoteDirection;
     } sequencer;
     
     float windowHeight=512;
@@ -231,6 +235,7 @@ struct Clip
 
     bool playing=false;
     uint64_t playingSample=0;
+    
 };
 
 class AudioLab : public Demo {

@@ -97,7 +97,7 @@ void Clip::RenderGUI()
     ImGui::SetNextWindowSize(ImVec2(piano.keysWidth + sequencer.width, windowHeight), ImGuiCond_Appearing);
 
 
-    ImGui::Begin("Keys", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar);
+    ImGui::Begin("Keys", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
 
     if(ImGui::Button("Play"))
     {
@@ -143,10 +143,9 @@ void Clip::RenderGUI()
     {
         sequencer.mousePos = glm::vec2(-1,-1);
     }
+
     
-    
-    
-    //Set current cell positions
+    //Set current hovered cell positions
     if(sequencer.mousePos.x>=0)
     {
         float normalizedMousePosX = sequencer.mousePos.x / sequencer.width;
@@ -165,8 +164,6 @@ void Clip::RenderGUI()
     
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-
 
     const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
 
@@ -225,23 +222,123 @@ void Clip::RenderGUI()
     }
 
 
+    if(!sequencer.resizingNote) sequencer.resizeNoteHash=-1;
     for (auto note : recordedNotes)
     {
+
         float startTime = (float)note.second.startTime;
+        float endTime = (float)note.second.endTime;
+        float cellsCovered = (endTime - startTime) / sequencer.cellDuration;
         float key = note.second.key;
         
         //In which cell does the note falls, given the start X parameter
-        int cellX = (int)((startTime / sequencer.cellDuration) - sequencer.startX);
+        int cellX = (int)std::ceil((startTime / sequencer.cellDuration) - sequencer.startX);
 
         float startX = canvasPos.x + cellX * vertSpacing;
-        float endX = startX + vertSpacing;
+        float endX = startX + vertSpacing * cellsCovered;
         float startY = canvasPos.y + (key / numNotes) * windowHeight;
         float endY = startY + horizSpacing;
         if(cellX < numCellsVisible && startX >= canvasPos.x) 
         {
             draw_list->AddRectFilled(ImVec2(startX, startY), ImVec2(endX, endY), IM_COL32(255, 255, 255, 255));
         }
+        
+
+        //Check for resizing
+        if(!sequencer.resizingNote)
+        {
+            float mouseX = io.MousePos.x;
+            bool intersectLeft = mouseX > startX && mouseX < startX + 10; 
+            bool intersectRight = mouseX < endX && mouseX > endX - 10;
+            if(intersectLeft || intersectRight)
+            {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                
+                int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
+                float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
+                int noteHash = (int)std::ceil(sequencer.hoveredCellY * numCells + correctedXPosition);
+                sequencer.resizeNoteHash = noteHash;
+                sequencer.resizeNoteDirection= intersectLeft ? -1.0f : 1.0f;
+            }
+        }
     }
+
+    //Add key
+    if(io.MouseClicked[0])
+    {
+        piano.currentKey = (int)((piano.mousePos.y / windowHeight) * 12.0f);
+
+        if(piano.mousePos.x>0)
+        {
+            piano.note.frequency = CalcFrequency(3, (float)piano.currentKey);
+            piano.note.Press(player->sound->GetTime());
+        }
+
+        int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
+        
+        //Check that we're not resizing as well
+        if(sequencer.mousePos.x > 0 && sequencer.resizeNoteHash==-1)
+        {
+            float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
+            float startTime = ((float)(correctedXPosition) / (float)numCells) * sequencer.recordDuration;
+            float endTime = startTime + (sequencer.recordDuration / numCells);
+            float key = ((float)sequencer.hoveredCellY / (float)numNotes) * 12;
+
+            int hash = (int)(sequencer.hoveredCellY * numCells + correctedXPosition);
+            if (recordedNotes.find(hash) == recordedNotes.end())
+            {
+                recordedNotes[hash] = Note(startTime, endTime, key, piano.instrument);
+            }
+            else
+            {
+                recordedNotes.erase(hash);
+            }
+        }
+    }
+
+    if(io.MouseClicked[0] && sequencer.resizeNoteHash >=0)
+    {
+        sequencer.resizingNote=true;
+    }
+    
+    if(sequencer.resizingNote)
+    {
+        int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+
+        float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
+        float time = ((float)(correctedXPosition) / (float)numCells) * sequencer.recordDuration;
+        
+        assert(recordedNotes.find(sequencer.resizeNoteHash) != recordedNotes.end());
+        
+        if(sequencer.resizeNoteDirection > 0)
+        {
+            recordedNotes[sequencer.resizeNoteHash].endTime = time;
+        }
+        else
+        {
+            recordedNotes[sequencer.resizeNoteHash].startTime = time;
+        }
+        
+    }
+
+    if(io.MouseReleased[0] && sequencer.resizingNote) 
+    {
+        sequencer.resizingNote=false;
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
+    }
+
+
+    // if(sequencer.resizingNote)
+    // {
+    //     ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            
+    //     // std::cout << "RESIZING "<< std::endl;
+    // }
+    // else
+    // {
+    //     ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
+    // }
 
     
     if(playing)
@@ -261,33 +358,7 @@ void Clip::RenderGUI()
 
 void Clip::MousePress()
 {
-    //Add key
-    piano.currentKey = (int)((piano.mousePos.y / windowHeight) * 12.0f);
 
-    if(piano.mousePos.x>0)
-    {
-        piano.note.frequency = CalcFrequency(3, (float)piano.currentKey);
-        piano.note.Press(player->sound->GetTime());
-    }
-
-    int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
-    if(sequencer.mousePos.x > 0)
-    {
-        float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
-        float startTime = ((float)(correctedXPosition) / (float)numCells) * sequencer.recordDuration;
-        float endTime = startTime + (sequencer.recordDuration / numCells);
-        float key = ((float)sequencer.hoveredCellY / (float)numNotes) * 12;
-
-        int hash = (int)(sequencer.hoveredCellY * numCells + correctedXPosition);
-        if (recordedNotes.find(hash) == recordedNotes.end())
-        {
-            recordedNotes[hash] = Note(startTime, endTime, key, piano.instrument);
-        }
-        else
-        {
-            recordedNotes.erase(hash);
-        }
-    }
 }
 
 void Clip::MouseRelease()
