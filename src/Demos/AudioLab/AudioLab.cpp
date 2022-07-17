@@ -143,9 +143,33 @@ void AudioLab::Load() {
     CreateComputeShader("shaders/AudioLab/keys.glsl", &piano.keysShader);
 }
 
-void AudioLab::Process()
-{
 
+void AudioLab::PlaySequencer()
+{
+    soundBuffer.clear();
+    soundBuffer.resize((size_t)sampleRate * (size_t)sequencer.recordDuration);
+    double time=0;
+    double deltaTime = 1.0 / sampleRate;
+    for(size_t i=0; i<soundBuffer.size(); i++)
+    {
+        double result=0;
+        
+
+        // double weight = 1.0 / recordedNotes.size();
+        for (auto note : recordedNotes)
+        {
+            double wave = instrument->sound(note.second.frequency, time);
+            bool finished=false;
+            double envelopeAmplitude = instrument->envelope.GetAmplitude(time, note.second.startTime, note.second.endTime, finished);
+            result += wave * envelopeAmplitude;         
+        }
+        
+        soundBuffer[i] = result;
+        time += deltaTime;
+    }
+
+    playing=true;
+    playingSample=0;
 }
 
 void AudioLab::RenderGUI() {
@@ -162,35 +186,26 @@ void AudioLab::RenderGUI() {
 
     if(ImGui::Button("Play"))
     {
-        soundBuffer.clear();
-        soundBuffer.resize((size_t)sampleRate * (size_t)sequencer.recordDuration);
-        double time=0;
-        double deltaTime = 1.0 / sampleRate;
-        for(size_t i=0; i<soundBuffer.size(); i++)
-        {
-            double result=0;
-            
-
-            // double weight = 1.0 / recordedNotes.size();
-            for (auto note : recordedNotes)
-            {
-                double wave = instrument->sound(note.second.frequency, time);
-                bool finished=false;
-                double envelopeAmplitude = instrument->envelope.GetAmplitude(time, note.second.startTime, note.second.endTime, finished);
-                result += wave * envelopeAmplitude;         
-            }
-            
-            soundBuffer[i] = result;
-            time += deltaTime;
-        }
-
-        playing=true;
-        playingSample=0;
+        PlaySequencer();
     }
-    ImGui::DragFloat("Duration", &sequencer.recordDuration, 0.1f, 1, 500);
-    
-    ImGui::Separator();
 
+
+    ImGui::DragFloat("Duration", &sequencer.recordDuration, 0.1f, 1, 500);
+    ImGui::Separator();
+    
+    ImGui::DragFloat("Zoom", &sequencer.zoomX, 0.1f, 0.1f, 10000);
+
+    int numCellsVisible = (int)((sequencer.recordDuration / sequencer.zoomX) / sequencer.cellDuration);
+    int totalCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
+    numCellsVisible = (std::min)(numCellsVisible, totalCells);
+
+    int difference = totalCells - numCellsVisible;
+
+    ImGui::PushID(0);
+    ImGui::SetNextItemWidth(sequencer.width);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX()+ piano.keysWidth);
+    ImGui::SliderInt("", &sequencer.startX, 0, difference, "");
+    ImGui::PopID();
 
     ImVec2 keyWindowPos = ImGui::GetCursorScreenPos();
     ImGui::Image((ImTextureID)piano.keysRenderTarget.glTex, ImVec2(piano.keysWidth, windowHeight));
@@ -211,16 +226,16 @@ void AudioLab::RenderGUI() {
     {
         sequencer.mousePos = glm::vec2(-1,-1);
     }
-
-    int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
-
+    
+    
+    
     //Set current cell positions
     if(sequencer.mousePos.x>=0)
     {
         float normalizedMousePosX = sequencer.mousePos.x / sequencer.width;
         float normalizedMousePosY = sequencer.mousePos.y / windowHeight;
 
-        sequencer.hoveredCellX = (int)std::floor(normalizedMousePosX * (float)numCells);
+        sequencer.hoveredCellX = (int)std::floor(normalizedMousePosX * (float)numCellsVisible);
         sequencer.hoveredCellY = (int)std::floor(normalizedMousePosY * (float)numNotes);
     }
     else
@@ -234,24 +249,52 @@ void AudioLab::RenderGUI() {
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
-    //Horizontal lines
+
+
     const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+
+    //Vertical lines
+    float vertSpacing = sequencer.width/(float)numCellsVisible;
+    int cellsPerSecond = (int)(1.0f / sequencer.cellDuration);
+    
+    for(int i=0; i<numCellsVisible; i++)
+    {
+        float y =canvasPos.y;
+        float x= canvasPos.x + vertSpacing * (float)i;
+
+        //Background
+        {
+            int second = (int)std::floor((float)(i + sequencer.startX) * sequencer.cellDuration);
+            ImU32 backgroundColor = IM_COL32(120, 120, 120, 255);
+            if((second+1)%2==0) backgroundColor = IM_COL32(100, 100, 100, 255);
+            draw_list->AddRectFilled(ImVec2(x, y), ImVec2(x + vertSpacing, y + windowHeight), backgroundColor);
+        }
+
+        //Line
+        {
+            ImU32 color = IM_COL32(150, 150, 150, 255);
+            float thickness = 0.1f;
+            if((i + sequencer.startX) % cellsPerSecond==0) 
+            {
+                color = IM_COL32(255, 255, 255, 255);
+                thickness = 0.3f;
+            }
+            
+            draw_list->AddLine(ImVec2(x, y), ImVec2(x, y + windowHeight), color, thickness);
+        }   
+    }
+
+    //Horizontal lines
     float horizSpacing = windowHeight / 12.0f;
     for(int i=0; i<numNotes+1; i++)
     {
         float y =canvasPos.y + (float)i * horizSpacing;
         float x= canvasPos.x;
-        draw_list->AddLine(ImVec2(x, y), ImVec2(x + 1000, y), IM_COL32(255, 255, 255, 255), 0.1f);
+        draw_list->AddLine(ImVec2(x, y), ImVec2(x + sequencer.width, y), IM_COL32(255, 255, 255, 255), 0.1f);
     }
 
-    //Vertical lines
-    float vertSpacing = sequencer.width/(float)numCells;
-    for(int i=0; i<(int)numCells; i++)
-    {
-        float y =canvasPos.y;
-        float x= canvasPos.x + vertSpacing * (float)i;
-        draw_list->AddLine(ImVec2(x, y), ImVec2(x, y + windowHeight), IM_COL32(255, 255, 255, 255), 0.1f);
-    }
+    
+
 
     if(sequencer.hoveredCellX>=0)
     {
@@ -259,19 +302,27 @@ void AudioLab::RenderGUI() {
         float endX   = startX + vertSpacing;
         float startY = canvasPos.y + sequencer.hoveredCellY * horizSpacing;
         float endY   = startY + horizSpacing;
+        
         draw_list->AddRectFilled(ImVec2(startX, startY), ImVec2(endX, endY), IM_COL32(255, 255, 0, 255));
     }
+
 
     for (auto note : recordedNotes)
     {
         float startTime = (float)note.second.startTime;
         float key = note.second.key;
+        
+        //In which cell does the note falls, given the start X parameter
+        int cellX = (int)((startTime / sequencer.cellDuration) - sequencer.startX);
 
-        float startX = canvasPos.x + (startTime / sequencer.recordDuration) * sequencer.width;
+        float startX = canvasPos.x + cellX * vertSpacing;
         float endX = startX + vertSpacing;
         float startY = canvasPos.y + (key / numNotes) * windowHeight;
         float endY = startY + horizSpacing;
-        draw_list->AddRectFilled(ImVec2(startX, startY), ImVec2(endX, endY), IM_COL32(255, 255, 255, 255));
+        if(cellX < numCellsVisible && startX >= canvasPos.x) 
+        {
+            draw_list->AddRectFilled(ImVec2(startX, startY), ImVec2(endX, endY), IM_COL32(255, 255, 255, 255));
+        }
     }
 
     
@@ -326,11 +377,12 @@ void AudioLab::LeftClickDown() {
     int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
     if(sequencer.mousePos.x > 0)
     {
-        float startTime = ((float)sequencer.hoveredCellX / (float)numCells) * sequencer.recordDuration;
+        float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
+        float startTime = ((float)(correctedXPosition) / (float)numCells) * sequencer.recordDuration;
         float endTime = startTime + (sequencer.recordDuration / numCells);
         float key = ((float)sequencer.hoveredCellY / (float)numNotes) * 12;
 
-        int hash = sequencer.hoveredCellY * numCells + sequencer.hoveredCellX;
+        int hash = (int)(sequencer.hoveredCellY * numCells + correctedXPosition);
         if (recordedNotes.find(hash) == recordedNotes.end())
         {
             recordedNotes[hash] = Note(startTime, endTime, key);

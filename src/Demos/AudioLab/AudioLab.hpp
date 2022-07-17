@@ -187,8 +187,6 @@ public :
     void Scroll(float offset);
     void Key(int keyCode, int action);
 
-    void Process();
-
     struct
     {
         float positionX;
@@ -226,6 +224,7 @@ public :
         float recordDuration=5;
 
         float zoomX = 1;
+        int startX = 0;
     } sequencer;
     
     float windowHeight=512;
@@ -256,7 +255,7 @@ public :
     std::array<double, 12> frequencies;
     std::vector<Note> notes;
 
-    
+    void PlaySequencer();
 
     int sampleRate = 44100;
     double timeStep;
