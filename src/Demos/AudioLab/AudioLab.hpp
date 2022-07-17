@@ -218,12 +218,14 @@ public :
     {
         float width = 512;
         glm::vec2 mousePos;
-        int numCells=10;
 
-        int currentCellX;
-        int currentCellY;
+        int hoveredCellX;
+        int hoveredCellY;
         
+        float cellDuration = 0.1f;
         float recordDuration=5;
+
+        float zoomX = 1;
     } sequencer;
     
     float windowHeight=512;
