@@ -73,7 +73,7 @@ double AudioLab::Noise(double time)
 {
     double result=0;
 
-    double weight = 1.0f / (double)notes.size();
+	    double weight = 1.0f / (double)notes.size();
 
 	// if (notes.size() == 0) return 0;
     for(int i = (int)notes.size() - 1; i >= 0; i--)
@@ -139,17 +139,83 @@ void AudioLab::RenderGUI() {
     ImGui::DragFloat("Amplitude", &amplitude, 0.01f, 0, 1);
     ImGui::Combo("Oscillator", &type, "Sine\0Square\0Triangle\0Saw0\0Saw1\0Random\0\0");
 
-    ImGui::SetNextWindowSize(ImVec2(piano.keysWidth, piano.keysHeight), ImGuiCond_Appearing);
-    ImGui::Begin("Keys", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar);
-    ImGui::Image((ImTextureID)piano.keysRenderTarget.glTex, ImVec2(piano.keysWidth, piano.keysHeight));
-    ImVec2 windowSize = ImGui::GetWindowSize();
-    piano.keysWidth = windowSize.x;
-    piano.keysHeight = windowSize.y;
+    ImGuiStyle& style = ImGui::GetStyle();
+    float padding = style.WindowPadding.x;
 
-    ImVec2 keyWindowPos = ImGui::GetWindowPos();
-    piano.mouseInKeyWindowPos = glm::vec2(mouse.positionX - (int)keyWindowPos.x, mouse.positionY - keyWindowPos.y); 
+    ImGui::SetNextWindowSize(ImVec2(piano.keysWidth + sequencer.width, windowHeight), ImGuiCond_Appearing);
+
+    ImGui::Begin("Keys", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoDecoration);
     
+    
+    ImGui::Image((ImTextureID)piano.keysRenderTarget.glTex, ImVec2(piano.keysWidth, windowHeight));
+    
+    ImVec2 keyWindowPos = ImGui::GetWindowPos();
+    glm::vec2 mouseInWindowPos =glm::vec2(mouse.positionX - (int)keyWindowPos.x - padding, mouse.positionY - keyWindowPos.y);  
+    
+    //Piano mouse pos
+    piano.mousePos = mouseInWindowPos;
+    if(piano.mousePos.x < 0 || piano.mousePos.y < 0 || piano.mousePos.x > piano.keysWidth || piano.mousePos.y > windowHeight)
+    {
+        piano.mousePos = glm::vec2(-1,-1);
+    }
 
+    //Sequencer mouse pos
+    sequencer.mousePos = mouseInWindowPos - glm::vec2(piano.keysWidth + padding, 0);
+    if(sequencer.mousePos.x < 0 || sequencer.mousePos.y < 0 || sequencer.mousePos.x > sequencer.width || sequencer.mousePos.y > windowHeight)
+    {
+        sequencer.mousePos = glm::vec2(-1,-1);
+    }
+    
+    //Set current cell positions
+    if(sequencer.mousePos.x>=0)
+    {
+        float normalizedMousePosX = sequencer.mousePos.x / sequencer.width;
+        float normalizedMousePosY = sequencer.mousePos.y / windowHeight;
+
+        sequencer.currentCellX = (int)std::floor(normalizedMousePosX * (float)sequencer.numCells);
+        sequencer.currentCellY = (int)std::floor(normalizedMousePosY * (float)numNotes);
+    }
+    else
+    {
+        sequencer.currentCellX=-1;
+        sequencer.currentCellY=-1;
+    }
+
+
+    
+    //Draw sequencer
+    ImGui::SameLine();
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    //Horizontal lines
+    const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+    float horizSpacing = windowHeight / 12.0f;
+    for(int i=0; i<numNotes+1; i++)
+    {
+        float y =canvasPos.y + (float)i * horizSpacing;
+        float x= canvasPos.x;
+        draw_list->AddLine(ImVec2(x, y), ImVec2(x + 1000, y), IM_COL32(255, 255, 255, 255), 1);
+    }
+
+    //Vertical lines
+    float vertSpacing = sequencer.width/(float)sequencer.numCells;
+    for(int i=0; i<(int)sequencer.numCells; i++)
+    {
+        float y =canvasPos.y;
+        float x= canvasPos.x + vertSpacing * (float)i;
+        draw_list->AddLine(ImVec2(x, y), ImVec2(x, y + windowHeight), IM_COL32(255, 255, 255, 255), 1);
+    }
+
+    if(sequencer.currentCellX>=0)
+    {
+        float startX = canvasPos.x + sequencer.currentCellX * vertSpacing;
+        float endX   = startX + vertSpacing;
+        float startY = canvasPos.y + sequencer.currentCellY * horizSpacing;
+        float endY   = startY + horizSpacing;
+        draw_list->AddRectFilled(ImVec2(startX, startY), ImVec2(endX, endY), IM_COL32(255, 255, 0, 255));
+    }
+    
 
 
     ImGui::End();
@@ -168,8 +234,8 @@ void AudioLab::Render()
 
     glUniform1i(glGetUniformLocation(piano.keysShader, "mousePressed"), (int)mouse.leftPressed);
     glUniform1i(glGetUniformLocation(piano.keysShader, "pressedKey"), piano.currentKey);
-    glUniform2fv(glGetUniformLocation(piano.keysShader, "mousePosition"), 1, glm::value_ptr(piano.mouseInKeyWindowPos));
-    glUniform2f(glGetUniformLocation(piano.keysShader, "keysWindowSize"), (float)piano.keysWidth, (float)piano.keysHeight);
+    glUniform2fv(glGetUniformLocation(piano.keysShader, "mousePosition"), 1, glm::value_ptr(piano.mousePos));
+    glUniform2f(glGetUniformLocation(piano.keysShader, "keysWindowSize"), (float)piano.keysWidth, (float)windowHeight);
     
     glDispatchCompute((piano.keysRenderTarget.width / 32) + 1, (piano.keysRenderTarget.height / 32) + 1, 1);
 	glUseProgram(0);
@@ -190,17 +256,23 @@ void AudioLab::LeftClickDown() {
     mouse.leftPressed=true;
 
     //Add key
-    piano.currentKey = (int)((piano.mouseInKeyWindowPos.y / piano.keysHeight) * 12.0f);
+    piano.currentKey = (int)((piano.mousePos.y / windowHeight) * 12.0f);
 
-    if(piano.mouseInKeyWindowPos.x>0)
+    if(piano.mousePos.x>0)
     {
         piano.note.frequency = CalcFrequency(3, (float)piano.currentKey);
         piano.note.Press(sound->GetTime());
     }
+
+
+    
 }
 
 void AudioLab::LeftClickUp() {
-    piano.note.Release(sound->GetTime());
+    if(piano.mousePos.x>0)
+    {
+        piano.note.Release(sound->GetTime());
+    }
     
     mouse.leftPressed=false;
 }

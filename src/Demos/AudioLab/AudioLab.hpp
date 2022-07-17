@@ -197,14 +197,27 @@ public :
         GL_TextureFloat keysRenderTarget;
         GL_Texture keysTexture;
         GLint keysShader;
-        float keysHeight = 512;
         float keysWidth = 64;
-        glm::vec2 mouseInKeyWindowPos;
+        glm::vec2 mousePos;
         int currentKey;
         
         Note note;
     } piano;
+
+    struct
+    {
+        float width = 512;
+        glm::vec2 mousePos;
+        int numCells=10;
+
+        int currentCellX;
+        int currentCellY;
+    } sequencer;
     
+    float windowHeight=512;
+    float recordLength=20;
+    int numNotes=12;
+
     // std::array<Envelope, 12> envelopes;
     std::array<int, 12> keys = 
     {
