@@ -352,8 +352,8 @@ private:
     float elapsedTime;
 
     GL_Shader MeshShader;
-
     GL_Mesh* Quad;
+    
     GL_TextureFloat texture;
     GL_TextureFloat tmpTexture;
     

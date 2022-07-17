@@ -2,7 +2,9 @@
 #include "../Demo.hpp"
 #include <array>
 #include <vector>
-
+#include "GL_Helpers/GL_Texture.hpp"
+#include "GL_Helpers/GL_Shader.hpp"
+#include "GL_Helpers/GL_Mesh.hpp"
 
 template<class T>
 class olcNoiseMaker;
@@ -142,8 +144,17 @@ struct Note
 
     int keyPressed;
     
-    Note(double time, double frequency, int keyPressed) : startTime(time), frequency(frequency), keyPressed(keyPressed), endTime(-1) {}
+    Note(){}
+    Note(double time, double frequency, int keyPressed) : frequency(frequency), keyPressed(keyPressed), endTime(-1) 
+    {
+        Press(time);
+    }
 
+    void Press(double time)
+    {
+        startTime = time;
+        endTime=-1;
+    }
     void Release(double time)
     {
         endTime=time;
@@ -168,12 +179,28 @@ public :
 
     void Process();
 
+    struct
+    {
+        float positionX;
+        float positionY;
+        bool leftPressed=false;
+    } mouse;
+
     // float frequency=440.0f;
     int type=0;
     float amplitude = 1.0f;
 
     double Noise(double t);
 
+    //Renderer
+    GL_TextureFloat keysRenderTarget;
+    GL_Texture keysTexture;
+    GLint keysShader;
+    float keysHeight = 512;
+    float keysWidth = 64;
+    glm::vec2 mouseInKeyWindowPos;
+    
+    int currentKey;
     
     // std::array<Envelope, 12> envelopes;
     std::array<int, 12> keys = 
@@ -193,6 +220,8 @@ public :
     };
     std::array<double, 12> frequencies;
     std::vector<Note> notes;
+
+    Note pianoNote;
     
 
     int sampleRate = 44100;
