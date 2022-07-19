@@ -141,7 +141,7 @@ struct Instrument
     bool doFrequencyDecay=false;
     
     double sound(Note* note, double time);
-    void RenderGui(ImDrawList* draw_list);
+    void RenderGui();
 
     Graph waveGraph;
     float scaleX=35;
@@ -302,7 +302,8 @@ struct Clip
     float windowHeight;
     int numNotes=12;
 
-    void RenderGUI();
+    void RenderPianoView();
+    void RenderInstrumentProperties();
     void FillAudioBuffer();
 
     void MousePress();

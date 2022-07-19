@@ -71,8 +71,10 @@ glm::vec2 Graph::RemapCoord(glm::vec2 coord)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void Instrument::RenderGui(ImDrawList* draw_list)
+void Instrument::RenderGui()
 {
+    ImGui::Begin("Instrument");
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
     if(ImGui::CollapsingHeader("Instrument"))
     {
         envelope.RenderGui(draw_list);
@@ -118,6 +120,8 @@ void Instrument::RenderGui(ImDrawList* draw_list)
             ImGui::TreePop();
         }
     }
+
+    ImGui::End();
 }
 
 double Instrument::sound(Note* note, double time)
@@ -293,7 +297,7 @@ Clip::Clip(AudioPlayer *audioPlayer)
     piano.keysTexture = GL_Texture("resources/AudioLab/keys.png", tci);
     CreateComputeShader("shaders/AudioLab/keys.glsl", &piano.keysShader);   
 }
-void Clip::RenderGUI()
+void Clip::RenderPianoView()
 {
     ImGuiIO& io = ImGui::GetIO();
     
@@ -585,9 +589,9 @@ void Clip::RenderGUI()
     ImGui::InvisibleButton("##SequencerBtn", ImVec2(sequencer.width, sequencerHeight));
     // std::cout << canvasPos.y << " " << sequencerHeight << std::endl;
 #endif
-    piano.instrument->RenderGui(draw_list);
     ImGui::End();
 }
+
 
 void Clip::MousePress()
 {
@@ -681,8 +685,6 @@ double AudioLab::Noise(double time)
         result += clips[i].Sound(time);
     }
 
-
-
     result *= audioPlayer.amplitude;
     result = (std::min)(1.0, (std::max)(-1.0, result));
     return result;
@@ -716,9 +718,25 @@ void AudioLab::Load() {
 
 
 void AudioLab::RenderGUI() {
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::SetNextWindowViewport(viewport->ID);
+    window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+    ImGui::Begin("AudioLab", nullptr, window_flags);
     ImGui::DragFloat("Amplitude", &audioPlayer.amplitude, 0.01f, 0, 1);
     
-    clips[currentClip].RenderGUI();
+
+    ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
+    ImGuiID dockspace_id = ImGui::GetID("AudioLabDockSpace");
+    ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
+
+    clips[currentClip].RenderPianoView();
+    
+    clips[currentClip].piano.instrument->RenderGui();
+    ImGui::End();
 }
 
 void AudioLab::Render() 

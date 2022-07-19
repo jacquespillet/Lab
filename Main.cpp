@@ -129,7 +129,11 @@ public:
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
         glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT , GL_TRUE);
         glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT , GLFW_FALSE);
-        window = glfwCreateWindow(1280, 720, "Testing", NULL, NULL);
+        
+        GLFWmonitor* primary = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode = glfwGetVideoMode(primary);
+           
+        window = glfwCreateWindow(mode->width, mode->height, "Testing", NULL, NULL);
         if (window == NULL)
             return 1;
         glfwMakeContextCurrent(window);
@@ -169,10 +173,13 @@ public:
         // Setup Dear ImGui context
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
-        io = ImGui::GetIO(); (void)io;
-
+    
         // Setup Dear ImGui style
         ImGui::StyleColorsDark();
+
+        ImGuiIO &_io = ImGui::GetIO();
+        _io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
         //ImGui::StyleColorsClassic();
 
         // Setup Platform/Renderer bindings
@@ -183,7 +190,7 @@ public:
     void Start() {
         demoManager={};
         ImVec4 clear_color = ImVec4(0.0f, 0.0f, 0.0f, 1.00f);
-
+        
         // Main loop
         while (!glfwWindowShouldClose(window))
         {
@@ -262,11 +269,12 @@ public:
     GLFWwindow* window;
 private:
     const char* glsl_version;
-    ImGuiIO io;
     DemoManager demoManager;
 
 
     void RenderGUI() {
+        
+
         {
             ImGui::Begin("Demos : "); 
             if(ImGui::Button("Image Lab", ImVec2(100, 20))) {
