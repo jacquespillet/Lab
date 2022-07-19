@@ -45,6 +45,93 @@
 //  Add a track UI that contains multiple clips with some controls
 //  
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void Graph::Render(ImDrawList* draw_list)
+{
+
+    draw_list->AddRect(ImVec2(origin.x, origin.y), ImVec2(origin.x + size.x, origin.y + size.y), IM_COL32(255, 255, 255, 255));
+    ImGui::InvisibleButton("enveloppeCanvas", ImVec2(size.x, size.y));
+
+    for(int i=0; i<points.size()-1; i++)
+    {
+        glm::vec2 start = RemapCoord(points[i]);
+        glm::vec2 end = RemapCoord(points[i+1]);
+        draw_list->AddLine(ImVec2(start.x, start.y), ImVec2(end.x, end.y), IM_COL32(255,255,255,255), 0.1f);
+    }
+}
+
+
+//Takes normalized coordinates between 0 and 1
+glm::vec2 Graph::RemapCoord(glm::vec2 coord)
+{
+    glm::vec2 result(0,0);
+    result.x  = origin.x + coord.x * size.x;
+    result.y  = origin.y + size.y - coord.y * size.y;
+
+    return result;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Envelope::RenderGui(ImDrawList* draw_list)
+{
+    if(ImGui::CollapsingHeader("Enveloppe"))
+    {
+        float f_attack = (float)attack;
+        ImGui::DragFloat("AttacK", &f_attack, 0.01f, 0, 10000.0f);
+        attack = f_attack;
+
+        float f_decay = (float)decay;
+        ImGui::DragFloat("Decay", &f_decay, 0.01f, 0, 10000.0f);
+        decay = f_decay;
+
+        float f_release = (float)release;
+        ImGui::DragFloat("Release", &f_release, 0.01f, 0, 10000.0f);
+        release = f_release;
+        
+        float f_startAmplitude = (float)startAmplitude;
+        ImGui::DragFloat("Start Amplitude", &f_startAmplitude, 0.01f, 0, 10000.0f);
+        startAmplitude = f_startAmplitude;
+        
+        float f_amplitude = (float)amplitude;
+        ImGui::DragFloat("Amplitude", &f_amplitude, 0.01f, 0, 10000.0f);
+        amplitude = f_amplitude;
+        
+        float f_frequencyDecay = (float)frequencyDecay;
+        ImGui::DragFloat("Frequency Decay", &f_frequencyDecay, 0.01f, 0, 1.0f);
+        frequencyDecay = f_frequencyDecay;
+
+
+        float totalDuration = f_attack + f_decay + 4.0f + f_release;
+        float maxAmplitude = (float)(std::max)(startAmplitude, amplitude);
+
+        ImVec2 enveloppeCanvasPos = ImGui::GetCursorScreenPos();
+        enveloppeGraph.origin = glm::vec2(enveloppeCanvasPos.x, enveloppeCanvasPos.y);
+        enveloppeGraph.size = glm::vec2(256,256);
+
+        glm::vec2 attackLineStart(0,0);
+        glm::vec2 attackLineEnd = glm::vec2(attack/totalDuration, startAmplitude/maxAmplitude);
+        glm::vec2 decayLineEnd = glm::vec2(attackLineEnd.x + (decay/totalDuration), amplitude/maxAmplitude);
+        glm::vec2 noteLineEnd = glm::vec2(decayLineEnd.x + (4.0f/totalDuration), amplitude/maxAmplitude);
+        glm::vec2 releaseLineEnd(noteLineEnd.x + (release/totalDuration), 0);  
+
+        enveloppeGraph.points = 
+        {
+            attackLineStart, attackLineEnd, decayLineEnd, noteLineEnd, releaseLineEnd
+        };
+        
+        enveloppeGraph.Render(draw_list);
+
+    }
+
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 double Oscillator::SineWave(double frequency)
 {
     double result=0;
@@ -56,8 +143,10 @@ double Oscillator::SineWave(double frequency)
     result = sin(phase);
     return result;
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 float CalcFrequency(float fOctave,float fNote)
 {
     return (float)(440*pow(2.0,((double)((fOctave-4)*12+fNote))/12.0));
@@ -112,17 +201,9 @@ double GetWave(double frequency, int waveType, double time, double LFOAmplitude,
 
     return wave;
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-//Takes normalized coordinates between 0 and 1
-glm::vec2 Clip::RemapEnveloppeGraph(glm::vec2 coord)
-{
-    glm::vec2 result(0,0);
-    result.x  = enveloppeCanvasPos.x + coord.x * envelopeCanvasSize.x;
-    result.y  = enveloppeCanvasPos.y + envelopeCanvasSize.y - coord.y * envelopeCanvasSize.y;
-
-    return result;
-}
-
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void Clip::RenderGUI()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -415,61 +496,7 @@ void Clip::RenderGUI()
     ImGui::InvisibleButton("##SequencerBtn", ImVec2(sequencer.width, sequencerHeight));
     // std::cout << canvasPos.y << " " << sequencerHeight << std::endl;
 #endif
-    if(ImGui::CollapsingHeader("Enveloppe"))
-    {
-        float attack = (float)piano.instrument->envelope.attack;
-        ImGui::DragFloat("AttacK", &attack, 0.01f, 0, 10000.0f);
-        piano.instrument->envelope.attack = attack;
-
-        float decay = (float)piano.instrument->envelope.decay;
-        ImGui::DragFloat("Decay", &decay, 0.01f, 0, 10000.0f);
-        piano.instrument->envelope.decay = decay;
-
-        float release = (float)piano.instrument->envelope.release;
-        ImGui::DragFloat("Release", &release, 0.01f, 0, 10000.0f);
-        piano.instrument->envelope.release = release;
-        
-        float startAmplitude = (float)piano.instrument->envelope.startAmplitude;
-        ImGui::DragFloat("Start Amplitude", &startAmplitude, 0.01f, 0, 10000.0f);
-        piano.instrument->envelope.startAmplitude = startAmplitude;
-        
-        float amplitude = (float)piano.instrument->envelope.amplitude;
-        ImGui::DragFloat("Amplitude", &amplitude, 0.01f, 0, 10000.0f);
-        piano.instrument->envelope.amplitude = amplitude;
-
-
-        float totalDuration = attack + decay + 4.0f + release;
-        float maxAmplitude = (std::max)(startAmplitude, amplitude);
-
-        ImVec2 ImEnveloppeCanvasPos = ImGui::GetCursorScreenPos();
-        enveloppeCanvasPos = glm::vec2(ImEnveloppeCanvasPos.x, ImEnveloppeCanvasPos.y);
-
-        draw_list->AddRect(ImEnveloppeCanvasPos, ImVec2(enveloppeCanvasPos.x + envelopeCanvasSize.x, enveloppeCanvasPos.y + envelopeCanvasSize.y), IM_COL32(255, 255, 255, 255));
-        ImGui::InvisibleButton("enveloppeCanvas", ImVec2(envelopeCanvasSize.x, envelopeCanvasSize.y));
-
-        glm::vec2 origin(enveloppeCanvasPos.x, enveloppeCanvasPos.y + envelopeCanvasSize.y);
-        glm::vec2 size(envelopeCanvasSize.x, -envelopeCanvasSize.y);
-
-        glm::vec2 attackLineStart(0,0);
-        glm::vec2 attackLineEnd = glm::vec2(attack/totalDuration, startAmplitude/maxAmplitude);
-        glm::vec2 remappedAttackLineStart = RemapEnveloppeGraph(attackLineStart);
-        glm::vec2 remappedAttackLineEnd = RemapEnveloppeGraph(attackLineEnd);
-        draw_list->AddLine(ImVec2(remappedAttackLineStart.x, remappedAttackLineStart.y), ImVec2(remappedAttackLineEnd.x, remappedAttackLineEnd.y), IM_COL32(255,255,255,255), 0.1f);
-        
-        glm::vec2 decayLineEnd = glm::vec2(attackLineEnd.x + (decay/totalDuration), amplitude/maxAmplitude);
-        glm::vec2 remappedDecayLineEnd = RemapEnveloppeGraph(decayLineEnd);
-        draw_list->AddLine(ImVec2(remappedAttackLineEnd.x, remappedAttackLineEnd.y), ImVec2(remappedDecayLineEnd.x, remappedDecayLineEnd.y), IM_COL32(255,255,255,255), 0.1f);
-        
-        glm::vec2 noteLineEnd = glm::vec2(decayLineEnd.x + (4.0f/totalDuration), amplitude/maxAmplitude);
-        glm::vec2 remappedNoteLineEnd = RemapEnveloppeGraph(noteLineEnd);
-        draw_list->AddLine(ImVec2(remappedDecayLineEnd.x, remappedDecayLineEnd.y), ImVec2(remappedNoteLineEnd.x, remappedNoteLineEnd.y), IM_COL32(255,255,255,255), 0.1f);
-        
-        glm::vec2 releaseLineEnd(noteLineEnd.x + (release/totalDuration), 0);
-        glm::vec2 remappedReleaseLineEnd = RemapEnveloppeGraph(releaseLineEnd);
-        draw_list->AddLine(ImVec2(remappedNoteLineEnd.x,remappedNoteLineEnd.y), ImVec2(remappedReleaseLineEnd.x, remappedReleaseLineEnd.y), IM_COL32(255,255,255,255), 0.1f);
-
-    }
-
+    piano.instrument->envelope.RenderGui(draw_list);
     ImGui::End();
 }
 
@@ -511,6 +538,35 @@ double Clip::Sound(double time)
 
     return result;
 }
+
+void Clip::FillAudioBuffer()
+{
+    soundBuffer.clear();
+    soundBuffer.resize((size_t)player->sampleRate * (size_t)sequencer.recordDuration);
+    double time=0;
+    double deltaTime = 1.0 / player->sampleRate;
+    for(size_t i=0; i<soundBuffer.size(); i++)
+    {
+        double result=0;
+        
+
+        // double weight = 1.0 / recordedNotes.size();
+        for (auto &note : recordedNotes)
+        {
+            double wave = note.second.instrument->sound(&note.second, time);
+            result += wave;         
+        }
+        
+        soundBuffer[i] = result;
+        time += deltaTime;
+    }
+
+    playing=true;
+    playingSample=0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 double AudioLab::Noise(double time)
 {
@@ -566,31 +622,7 @@ void AudioLab::Load() {
 }
 
 
-void Clip::FillAudioBuffer()
-{
-    soundBuffer.clear();
-    soundBuffer.resize((size_t)player->sampleRate * (size_t)sequencer.recordDuration);
-    double time=0;
-    double deltaTime = 1.0 / player->sampleRate;
-    for(size_t i=0; i<soundBuffer.size(); i++)
-    {
-        double result=0;
-        
 
-        // double weight = 1.0 / recordedNotes.size();
-        for (auto &note : recordedNotes)
-        {
-            double wave = note.second.instrument->sound(&note.second, time);
-            result += wave;         
-        }
-        
-        soundBuffer[i] = result;
-        time += deltaTime;
-    }
-
-    playing=true;
-    playingSample=0;
-}
 
 void AudioLab::RenderGUI() {
     ImGui::DragFloat("Amplitude", &audioPlayer.amplitude, 0.01f, 0, 1);
@@ -654,3 +686,5 @@ void AudioLab::Key(int keyCode, int action)
 
 void AudioLab::Scroll(float offset) {
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

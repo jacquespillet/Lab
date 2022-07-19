@@ -9,12 +9,23 @@
 
 template<class T>
 class olcNoiseMaker;
+struct ImDrawList;
 
 double GetWave(double phase, int waveType, double time, double LFOAmplitude=0, double LFOFrequency=0);
 double HertzToRadians(double hertz);
 
 float CalcFrequency(float fOctave,float fNote);
 
+struct Graph
+{
+    void Render(ImDrawList* draw_list);
+    std::vector<glm::vec2> points;
+
+    glm::vec2 RemapCoord(glm::vec2 coord);
+
+    glm::vec2 origin;
+    glm::vec2 size;
+};
 
 struct Oscillator
 {
@@ -34,6 +45,10 @@ struct Envelope
     double amplitude;
     double startAmplitude;
 
+    double frequencyDecay;
+
+    Graph enveloppeGraph;
+   
     Envelope()
     {
         attack = 0.01f;
@@ -41,6 +56,7 @@ struct Envelope
         startAmplitude = 1.0;
         amplitude = 0.0;
         release = 1;
+        frequencyDecay=0;
     }
 
 
@@ -90,6 +106,8 @@ struct Envelope
 
         return result;
     }
+
+    void RenderGui(ImDrawList* draw_list);
     
     
 };
@@ -178,9 +196,7 @@ struct Harmonica : public Instrument
         
         double frequencyMultiplier=1;
         double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished, frequencyMultiplier);
-        
-        double freqDecay = 0;
-        double frequency = note->frequency * ((1.0 - freqDecay) + (frequencyMultiplier*freqDecay));
+        double frequency = note->frequency * ((1.0 - envelope.frequencyDecay) + (frequencyMultiplier*envelope.frequencyDecay));
 
 
         wave += envelopeAmplitude * note->oscillator.SineWave(frequency);
@@ -248,10 +264,8 @@ struct Clip
 
     double Sound(double time);
     
-    glm::vec2 enveloppeCanvasPos;
-    glm::vec2 envelopeCanvasSize = glm::vec2(256, 256);
-    glm::vec2 RemapEnveloppeGraph(glm::vec2 coord);
-
+     // glm::vec2 enveloppeCanvasPos;
+    // glm::vec2 envelopeCanvasSize = glm::vec2(256, 256);
     std::unordered_map<uint32_t, Note> recordedNotes;
     std::vector<double> soundBuffer;
 
