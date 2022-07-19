@@ -265,20 +265,25 @@ void Clip::RenderGUI()
     if(!sequencer.resizingNote) sequencer.resizeNoteHash=-1; //If we're not resizing, set the resized note ID to -1
     for (auto note : recordedNotes)
     {
+        float key = note.second.key;
+        
         float startTime = (float)note.second.startTime;
         float endTime = (float)note.second.endTime;
         float cellsCovered = (endTime - startTime) / sequencer.cellDuration; //How many cells are covered by the note ?
-        float key = note.second.key;
         
         //In which cell does the note falls, given the start X parameter
         int cellX = (int)std::ceil((startTime / sequencer.cellDuration) - sequencer.startX);
 
         //Actual pixel coordinates to draw the cell
-        float startX = canvasPos.x + cellX * vertSpacing;
+        float startX = (canvasPos.x + cellX * vertSpacing);
+        float overlap = (std::max)(0.0f, canvasPos.x - startX); //When the note is overlapping the left piano keys, we start later, and end sooner
+        startX += overlap;
         float endX = startX + vertSpacing * cellsCovered;
+        endX -= overlap;
+
         float startY = canvasPos.y + (key / numNotes) * windowHeight;
         float endY = startY + horizSpacing;
-        if(cellX < numCellsVisible && startX >= canvasPos.x) 
+        if(cellX < numCellsVisible && endX >= canvasPos.x) 
         {
             draw_list->AddRectFilled(ImVec2(startX, startY), ImVec2(endX, endY), IM_COL32(255, 255, 255, 255));
         }
