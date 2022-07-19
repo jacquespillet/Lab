@@ -17,7 +17,6 @@
 
 
 //TODO
-//  Add a drum https://blog.demofox.org/diy-synthesizer/
 //  add flange effect https://blog.demofox.org/2015/03/16/diy-synth-flange-effect/
 //  add delay https://blog.demofox.org/2015/03/17/diy-synth-delay-effect-echo/
 //  add reverb https://blog.demofox.org/2015/03/17/diy-synth-multitap-reverb/
@@ -43,7 +42,6 @@
 //      lopass
 //      hipass
 //  Add a track UI that contains multiple clips with some controls
-//  
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void Graph::Render(ImDrawList* draw_list)
@@ -73,10 +71,38 @@ glm::vec2 Graph::RemapCoord(glm::vec2 coord)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void Instrument::RenderGui(ImDrawList* draw_list)
+{
+    if(ImGui::CollapsingHeader("Instrument"))
+    {
+        envelope.RenderGui(draw_list);
+        if(ImGui::TreeNode("Waves"))
+        {
+            bool numNotesChanged = ImGui::SliderInt("Number of waves", &numNotes, 1, 8);
+            if(numNotesChanged) waveParams.resize(numNotes);
+            for(int i=0; i<waveParams.size(); i++)
+            {
+                ImGui::Text("Wave %d", i);
+                ImGui::PushID(i*2 + 0);
+                    ImGui::SliderFloat("Amplitude Modulation", &waveParams[i].amplitudeModulation, 0, 3);
+                ImGui::PopID();
+                
+                ImGui::PushID(i*2 + 1);
+                    ImGui::SliderFloat("Frequency Modulation", &waveParams[i].frequencyModulation, 0, 10);
+                ImGui::PopID();
+            }
+
+            ImGui::TreePop();
+        }
+    }
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void Envelope::RenderGui(ImDrawList* draw_list)
 {
-    if(ImGui::CollapsingHeader("Enveloppe"))
+    if(ImGui::TreeNode("Enveloppe"))
     {
         float f_attack = (float)attack;
         ImGui::DragFloat("AttacK", &f_attack, 0.01f, 0, 10000.0f);
@@ -123,6 +149,7 @@ void Envelope::RenderGui(ImDrawList* draw_list)
         
         enveloppeGraph.Render(draw_list);
 
+        ImGui::TreePop();
     }
 
 }
@@ -496,7 +523,7 @@ void Clip::RenderGUI()
     ImGui::InvisibleButton("##SequencerBtn", ImVec2(sequencer.width, sequencerHeight));
     // std::cout << canvasPos.y << " " << sequencerHeight << std::endl;
 #endif
-    piano.instrument->envelope.RenderGui(draw_list);
+    piano.instrument->RenderGui(draw_list);
     ImGui::End();
 }
 

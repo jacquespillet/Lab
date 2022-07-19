@@ -16,6 +16,11 @@ double HertzToRadians(double hertz);
 
 float CalcFrequency(float fOctave,float fNote);
 
+enum class WaveType
+{
+    Sine=0
+};
+
 struct Graph
 {
     void Render(ImDrawList* draw_list);
@@ -119,8 +124,17 @@ struct Instrument
     double volume;
     Envelope envelope;
     int numNotes=1;
+    struct WaveParams
+    {
+        float frequencyModulation=1;
+        float amplitudeModulation=1;
+        WaveType waveType;
+    };
+    std::vector<WaveParams> waveParams;
     
     virtual double sound(Note* note, double time)=0;
+
+    void RenderGui(ImDrawList* draw_list);
 };
 
 struct Note
@@ -197,28 +211,38 @@ struct Harmonica : public Instrument
         envelope.amplitude = 1.0;
         envelope.release = 0.2;
 
-        numNotes=3;
+        numNotes=2;
+
+        waveParams.resize(2);
+        waveParams[0].amplitudeModulation = 1;
+        waveParams[0].frequencyModulation = 1;
+        
+        waveParams[1].amplitudeModulation = 3;
+        waveParams[1].frequencyModulation = 0.5;
     }
 
     double sound(Note* note, double time)
     {
         double wave = 0;
         
+        double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished);
+        for(int i=0; i<numNotes; i++)
+        {
+            wave += waveParams[i].amplitudeModulation * envelopeAmplitude * note->oscillators[i].SineWave(note->frequency * waveParams[i].frequencyModulation);
+        }
 
         //for(int i=0; i<numNotes; i++)
         //DRUM
         // {
         //     double frequencyMultiplier=1;
-        //     double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished, frequencyMultiplier);
         //     double frequency = note->frequency * ((1.0 - envelope.frequencyDecay) + (frequencyMultiplier*envelope.frequencyDecay));
         //     wave += envelopeAmplitude * note->oscillators[i].SineWave(frequency);
         // }
         
         //
-        double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished);
-        wave += envelopeAmplitude * note->oscillators[0].SineWave(note->frequency);
-        wave += 0.5 * envelopeAmplitude * note->oscillators[1].SineWave(note->frequency * 3);
-        wave += 0.25 * envelopeAmplitude * note->oscillators[1].SineWave(note->frequency * 2);
+        // double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished);
+        // wave += envelopeAmplitude * note->oscillators[0].SineWave(note->frequency);
+        // wave += 0.25 * envelopeAmplitude * note->oscillators[1].SineWave(note->frequency * 2);
     
 
         return wave;
@@ -289,7 +313,7 @@ struct Clip
         int hoveredCellX;
         int hoveredCellY;
         
-        float cellDuration = 0.1f;
+        float cellDuration = 0.125f;
         float recordDuration=5;
 
         float zoomX = 1;
