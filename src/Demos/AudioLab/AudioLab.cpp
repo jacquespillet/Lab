@@ -51,6 +51,24 @@
 //  Add a track UI that contains multiple clips with some controls
 //  
 
+double Oscillator::SineWave(double frequency)
+{
+    double result=0;
+    // phase += TWO_PI * frequency/sampleRate;
+    // while(phase >= TWO_PI)
+    //     phase -= TWO_PI;
+    // while(phase < 0)
+    //     phase += TWO_PI;
+
+
+    time += 1.0/sampleRate;
+    // std::cout << frequency << " " << time << std::endl;
+    phase = HertzToRadians(frequency) * time;
+    result = sin(phase);
+    return result;
+}
+
+
 float CalcFrequency(float fOctave,float fNote)
 {
     return (float)(440*pow(2.0,((double)((fOctave-4)*12+fNote))/12.0));
@@ -418,7 +436,7 @@ double Clip::Sound(double time)
     double result=0;
     //Piano note
     {
-        double wave = piano.instrument->sound(piano.note.frequency, time);
+        double wave = piano.instrument->sound(time, piano.note.frequency);
             
         bool finished=false;
         double envelopeAmplitude = piano.instrument->envelope.GetAmplitude(time, piano.note.startTime, piano.note.endTime, finished);
@@ -447,15 +465,16 @@ double AudioLab::Noise(double time)
     
     double result=0;
     double weight = 1.0f / (double)notes.size();
-
+    weight=1;
 	for(int i = (int)notes.size() - 1; i >= 0; i--)
     {
 
-        double wave = notes[i].instrument->sound(notes[i].frequency, time);
-        
+        double wave = notes[i].instrument->sound(time, notes[i].frequency);
         bool finished=false;
         double envelopeAmplitude = notes[i].instrument->envelope.GetAmplitude(time, notes[i].startTime, notes[i].endTime, finished);
         
+        if(finished) notes.erase(notes.begin() + i);
+        // std::cout << wave << std::endl;
         result += wave * envelopeAmplitude * weight;
     }
     

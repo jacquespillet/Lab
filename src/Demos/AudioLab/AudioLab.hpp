@@ -16,6 +16,15 @@ double HertzToRadians(double hertz);
 float CalcFrequency(float fOctave,float fNote);
 
 
+struct Oscillator
+{
+    double SineWave(double frequency);
+    double phase=0;
+    double sampleRate = 44100;
+    double time=0;
+};
+
+
 struct Envelope
 {
     double attack;
@@ -86,7 +95,6 @@ struct Instrument
 {
     double volume;
     Envelope envelope;
-
     
 
     virtual double sound(double time, double frequency)=0;
@@ -130,10 +138,9 @@ struct Harmonica : public Instrument
     double sound(double time, double frequency)
     {
         double wave = 0;
-        wave += 1.0 * GetWave(frequency, 1, time, 0.001, 5);
-        wave += 0.5 * GetWave(frequency * 1.5, 1, time);
-        wave += 0.25 * GetWave(frequency * 2, 1, time);
-        wave += 0.05 * GetWave(frequency, 5, time);
+        // wave += oscillator.SineWave(frequency);
+        // std::cout << frequency << std::endl;
+        // wave += 1.0 * GetWave(frequency * 2, 0, time, 0.001, 5);
 
         return wave;
     }
@@ -149,6 +156,8 @@ struct Note
 
     int keyPressed;
     
+    Oscillator oscillator;
+
     Note(){}
     
     Note(double startTime, double endTime, float key, Instrument *instrument) : frequency(frequency), startTime(startTime), endTime(endTime), key(key), instrument(instrument)
