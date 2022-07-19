@@ -13,6 +13,43 @@
 #include "olcNoiseMaker.h"
 
 //https://blog.demofox.org/diy-synthesizer/
+//https://github.com/micknoise/Maximilian/blob/master/src/maximilian.cpp
+
+
+//TODO
+//  Fix the longer notes disappearing when scrolling
+//  Prevent adding new notes inside a long note
+//  Delete long notes when clicking on them
+//  Refactor GetWave :
+//      have an oscillator class that keeps track of the phase, and call Wave(frequency) on the class
+//  Add a drum https://blog.demofox.org/diy-synthesizer/
+//  add flange effect https://blog.demofox.org/2015/03/16/diy-synth-flange-effect/
+//  add delay https://blog.demofox.org/2015/03/17/diy-synth-delay-effect-echo/
+//  add reverb https://blog.demofox.org/2015/03/17/diy-synth-multitap-reverb/
+//  add convolution reverb https://blog.demofox.org/2015/03/23/diy-synth-convolution-reverb-1d-discrete-convolution-of-audio-samples/
+//  Implement other types of wave from maximilian :
+//      sinewave
+//      coswave
+//      phasor
+//      phasorBetween
+//      saw
+//      triangle
+//      square
+//      pulse
+//      impulse
+//      noise
+//      sinebuf
+//      sinebuf4
+//      sawn
+//      rect
+//  Add maximilian filters
+//      lores
+//      hires
+//      bandpass
+//      lopass
+//      hipass
+//  Add a track UI that contains multiple clips with some controls
+//  
 
 float CalcFrequency(float fOctave,float fNote)
 {
@@ -167,11 +204,12 @@ void Clip::RenderGUI()
 
     const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
 
-    //Vertical lines
+
+
     float vertSpacing = sequencer.width/(float)numCellsVisible;
-
-
     int cellsPerSecond = (int)(1.0f / sequencer.cellDuration);
+    
+    //Draw vertical lines and background
     for(int i=0; i<numCellsVisible; i++)
     {
         float y =canvasPos.y;
@@ -210,7 +248,7 @@ void Clip::RenderGUI()
 
     
 
-
+    //Highlight the hovered cell
     if(sequencer.hoveredCellX>=0)
     {
         float startX = canvasPos.x + sequencer.hoveredCellX * vertSpacing;
@@ -222,18 +260,20 @@ void Clip::RenderGUI()
     }
 
 
-    if(!sequencer.resizingNote) sequencer.resizeNoteHash=-1;
+    //Draw all the recorded notes.
+    //Also handles note resizing in the loop to avoid 2 loops.
+    if(!sequencer.resizingNote) sequencer.resizeNoteHash=-1; //If we're not resizing, set the resized note ID to -1
     for (auto note : recordedNotes)
     {
-
         float startTime = (float)note.second.startTime;
         float endTime = (float)note.second.endTime;
-        float cellsCovered = (endTime - startTime) / sequencer.cellDuration;
+        float cellsCovered = (endTime - startTime) / sequencer.cellDuration; //How many cells are covered by the note ?
         float key = note.second.key;
         
         //In which cell does the note falls, given the start X parameter
         int cellX = (int)std::ceil((startTime / sequencer.cellDuration) - sequencer.startX);
 
+        //Actual pixel coordinates to draw the cell
         float startX = canvasPos.x + cellX * vertSpacing;
         float endX = startX + vertSpacing * cellsCovered;
         float startY = canvasPos.y + (key / numNotes) * windowHeight;
@@ -244,16 +284,19 @@ void Clip::RenderGUI()
         }
         
 
-        //Check for resizing
+        //if we're not resizing, find a resizing candidate and set the hash
         if(!sequencer.resizingNote)
         {
+            //Check if the mouse is at the bounds of the note
             float mouseX = io.MousePos.x;
             bool intersectLeft = mouseX > startX && mouseX < startX + 10; 
             bool intersectRight = mouseX < endX && mouseX > endX - 10;
             if(intersectLeft || intersectRight)
             {
+                //Set the cursor to resize
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
                 
+                //Set the note candidate hash and the direction
                 int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
                 float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
                 int noteHash = (int)std::ceil(sequencer.hoveredCellY * numCells + correctedXPosition);
@@ -263,7 +306,7 @@ void Clip::RenderGUI()
         }
     }
 
-    //Add key
+    //Add note
     if(io.MouseClicked[0])
     {
         piano.currentKey = (int)((piano.mousePos.y / windowHeight) * 12.0f);
@@ -296,32 +339,30 @@ void Clip::RenderGUI()
         }
     }
 
+    //if we click and the note hash is not -1
     if(io.MouseClicked[0] && sequencer.resizeNoteHash >=0)
     {
         sequencer.resizingNote=true;
     }
     
+    //If we're resizing
     if(sequencer.resizingNote)
     {
+        //ERROR : resizing a note that is not in the list 
+        //TODO --> should assert this to debug
 		if (recordedNotes.find(sequencer.resizeNoteHash) == recordedNotes.end()) return;
 
-        int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-
-        float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
-        float time = ((float)(correctedXPosition) / (float)numCells) * sequencer.recordDuration;
         
-        //assert(recordedNotes.find(sequencer.resizeNoteHash) != recordedNotes.end());
-        if(sequencer.resizeNoteDirection > 0)
-        {
-            recordedNotes[sequencer.resizeNoteHash].endTime = time;
-
-        }
-        else
-        {
-            recordedNotes[sequencer.resizeNoteHash].startTime = time;
-        }
         
+        float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX; //position of the hovered cell, taking startX into account
+        float time = ((float)(correctedXPosition) / (float)totalCells) * sequencer.recordDuration; //Time between 0 and recordDuration
+        
+        //Change the note time
+        if(sequencer.resizeNoteDirection > 0)recordedNotes[sequencer.resizeNoteHash].endTime = time;
+        else                                 recordedNotes[sequencer.resizeNoteHash].startTime = time;
+        
+        //If we swapped the bounds while resizing
         if(recordedNotes[sequencer.resizeNoteHash].endTime < recordedNotes[sequencer.resizeNoteHash].startTime)
         {
             std::swap(recordedNotes[sequencer.resizeNoteHash].endTime, recordedNotes[sequencer.resizeNoteHash].startTime);
@@ -329,32 +370,22 @@ void Clip::RenderGUI()
         
     }
 
+    //Stop resizing
     if(io.MouseReleased[0] && sequencer.resizingNote) 
     {
         sequencer.resizingNote=false;
         ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
     }
 
-
-    // if(sequencer.resizingNote)
-    // {
-    //     ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-            
-    //     // std::cout << "RESIZING "<< std::endl;
-    // }
-    // else
-    // {
-    //     ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
-    // }
-
     
+    //Draw a line while playing
     if(playing)
     {
         double samplesPerCell = (double)sequencer.cellDuration * player->sampleRate;
         double linePos = (double)(playingSample - sequencer.startX * samplesPerCell)  / (numCellsVisible * samplesPerCell);
         
         float x = canvasPos.x + (float)linePos * sequencer.width;
-        float y =canvasPos.y;
+        float y = canvasPos.y;
         if(x > canvasPos.x)
         {
             draw_list->AddLine(ImVec2(x, y), ImVec2(x, y + windowHeight), IM_COL32(200, 200, 200, 255), 2);
