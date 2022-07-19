@@ -17,18 +17,12 @@
 
 
 //TODO
-//  Fix the longer notes disappearing when scrolling
-//  Prevent adding new notes inside a long note
-//  Delete long notes when clicking on them
-//  Refactor GetWave :
-//      have an oscillator class that keeps track of the phase, and call Wave(frequency) on the class
 //  Add a drum https://blog.demofox.org/diy-synthesizer/
 //  add flange effect https://blog.demofox.org/2015/03/16/diy-synth-flange-effect/
 //  add delay https://blog.demofox.org/2015/03/17/diy-synth-delay-effect-echo/
 //  add reverb https://blog.demofox.org/2015/03/17/diy-synth-multitap-reverb/
 //  add convolution reverb https://blog.demofox.org/2015/03/23/diy-synth-convolution-reverb-1d-discrete-convolution-of-audio-samples/
 //  Implement other types of wave from maximilian :
-//      sinewave
 //      coswave
 //      phasor
 //      phasorBetween
@@ -54,16 +48,11 @@
 double Oscillator::SineWave(double frequency)
 {
     double result=0;
-    // phase += TWO_PI * frequency/sampleRate;
-    // while(phase >= TWO_PI)
-    //     phase -= TWO_PI;
-    // while(phase < 0)
-    //     phase += TWO_PI;
-
-
-    time += 1.0/sampleRate;
-    // std::cout << frequency << " " << time << std::endl;
-    phase = HertzToRadians(frequency) * time;
+    phase += TWO_PI * frequency/sampleRate;
+    while(phase >= TWO_PI)
+        phase -= TWO_PI;
+    while(phase < 0)
+        phase += TWO_PI;
     result = sin(phase);
     return result;
 }
@@ -281,7 +270,7 @@ void Clip::RenderGUI()
     //Draw all the recorded notes.
     //Also handles note resizing in the loop to avoid 2 loops.
     if(!sequencer.resizingNote) sequencer.resizeNoteHash=-1; //If we're not resizing, set the resized note ID to -1
-    for (auto note : recordedNotes)
+    for (auto& note : recordedNotes)
     {
         float key = note.second.key;
         
@@ -336,7 +325,7 @@ void Clip::RenderGUI()
 
         if(piano.mousePos.x>0)
         {
-            piano.note.frequency = CalcFrequency(3, (float)piano.currentKey);
+            piano.note.frequency = CalcFrequency(2, (float)piano.currentKey);
             piano.note.Press(player->sound->GetTime());
         }
 
@@ -373,24 +362,24 @@ void Clip::RenderGUI()
     {
         //ERROR : resizing a note that is not in the list 
         //TODO --> should assert this to debug
-		if (recordedNotes.find(sequencer.resizeNoteHash) == recordedNotes.end()) return;
-
-        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-        
-        
-        float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX; //position of the hovered cell, taking startX into account
-        float time = ((float)(correctedXPosition) / (float)totalCells) * sequencer.recordDuration; //Time between 0 and recordDuration
-        
-        //Change the note time
-        if(sequencer.resizeNoteDirection > 0)recordedNotes[sequencer.resizeNoteHash].endTime = time;
-        else                                 recordedNotes[sequencer.resizeNoteHash].startTime = time;
-        
-        //If we swapped the bounds while resizing
-        if(recordedNotes[sequencer.resizeNoteHash].endTime < recordedNotes[sequencer.resizeNoteHash].startTime)
+		if (recordedNotes.find(sequencer.resizeNoteHash) != recordedNotes.end()) 
         {
-            std::swap(recordedNotes[sequencer.resizeNoteHash].endTime, recordedNotes[sequencer.resizeNoteHash].startTime);
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            
+            
+            float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX; //position of the hovered cell, taking startX into account
+            float time = ((float)(correctedXPosition) / (float)totalCells) * sequencer.recordDuration; //Time between 0 and recordDuration
+            
+            //Change the note time
+            if(sequencer.resizeNoteDirection > 0)recordedNotes[sequencer.resizeNoteHash].endTime = time;
+            else                                 recordedNotes[sequencer.resizeNoteHash].startTime = time;
+            
+            //If we swapped the bounds while resizing
+            if(recordedNotes[sequencer.resizeNoteHash].endTime < recordedNotes[sequencer.resizeNoteHash].startTime)
+            {
+                std::swap(recordedNotes[sequencer.resizeNoteHash].endTime, recordedNotes[sequencer.resizeNoteHash].startTime);
+            }
         }
-        
     }
 
     //Stop resizing
@@ -436,12 +425,8 @@ double Clip::Sound(double time)
     double result=0;
     //Piano note
     {
-        double wave = piano.instrument->sound(time, piano.note.frequency);
-            
-        bool finished=false;
-        double envelopeAmplitude = piano.instrument->envelope.GetAmplitude(time, piano.note.startTime, piano.note.endTime, finished);
-        
-        result += wave * envelopeAmplitude;
+        double wave = piano.instrument->sound(&piano.note, time);
+        result += wave;
     }
     
 
@@ -468,14 +453,9 @@ double AudioLab::Noise(double time)
     weight=1;
 	for(int i = (int)notes.size() - 1; i >= 0; i--)
     {
-
-        double wave = notes[i].instrument->sound(time, notes[i].frequency);
-        bool finished=false;
-        double envelopeAmplitude = notes[i].instrument->envelope.GetAmplitude(time, notes[i].startTime, notes[i].endTime, finished);
-        
-        if(finished) notes.erase(notes.begin() + i);
-        // std::cout << wave << std::endl;
-        result += wave * envelopeAmplitude * weight;
+        double wave = notes[i].instrument->sound(&notes[i], time);
+        if(notes[i].finished) notes.erase(notes.begin() + i);
+        result += wave;
     }
     
     result += synthClip.Sound(time);
@@ -531,12 +511,10 @@ void Clip::FillAudioBuffer()
         
 
         // double weight = 1.0 / recordedNotes.size();
-        for (auto note : recordedNotes)
+        for (auto &note : recordedNotes)
         {
-            double wave = note.second.instrument->sound(note.second.frequency, time);
-            bool finished=false;
-            double envelopeAmplitude = note.second.instrument->envelope.GetAmplitude(time, note.second.startTime, note.second.endTime, finished);
-            result += wave * envelopeAmplitude;         
+            double wave = note.second.instrument->sound(&note.second, time);
+            result += wave;         
         }
         
         soundBuffer[i] = result;

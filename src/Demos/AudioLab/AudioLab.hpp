@@ -45,7 +45,7 @@ struct Envelope
 
 
 
-    double GetAmplitude(double time, double startTime, double endTime, bool &finished)
+    double GetAmplitude(double time, double startTime, double endTime, bool &finished, double &frequencyMultiplier)
     {
         finished=false;
 
@@ -53,7 +53,7 @@ struct Envelope
         double lifeTime = time - startTime;
 
         bool notePressed = (time < endTime);
-
+        frequencyMultiplier=1;
         if(notePressed)
         {
             //Attack
@@ -66,6 +66,7 @@ struct Envelope
             if(lifeTime > attack && lifeTime <= (attack + decay))
             {
                 result = ((lifeTime - attack) / decay) * (amplitude - startAmplitude) + startAmplitude;
+                frequencyMultiplier = result;
             }
 
             //Sustain
@@ -89,62 +90,11 @@ struct Envelope
 
         return result;
     }
-};
-
-struct Instrument
-{
-    double volume;
-    Envelope envelope;
     
-
-    virtual double sound(double time, double frequency)=0;
+    
 };
 
-struct Bell : public Instrument
-{
-    Bell()
-    {
-        envelope = {};
-        envelope.attack = 0.01f;
-        envelope.decay = 1.0f;
-        envelope.startAmplitude = 1.0;
-        envelope.amplitude = 0.0;
-        envelope.release = 1;
-    }
-
-    double sound(double time, double frequency)
-    {
-        double wave = 0;
-        wave += 1.0 * GetWave(frequency * 2, 0, time, 0.001, 5);
-        wave += 0.5 * GetWave(frequency * 3, 0, time);
-        wave += 0.25 * GetWave(frequency * 4, 0, time);
-
-        return wave;
-    }
-};
-
-struct Harmonica : public Instrument
-{
-    Harmonica()
-    {
-        envelope = {};
-        envelope.attack = 0.2f;
-        envelope.decay = 0.1f;
-        envelope.startAmplitude = 1.0;
-        envelope.amplitude = 1.0;
-        envelope.release = 0.2;
-    }
-
-    double sound(double time, double frequency)
-    {
-        double wave = 0;
-        // wave += oscillator.SineWave(frequency);
-        // std::cout << frequency << std::endl;
-        // wave += 1.0 * GetWave(frequency * 2, 0, time, 0.001, 5);
-
-        return wave;
-    }
-};
+struct Instrument;
 
 struct Note
 {
@@ -155,6 +105,8 @@ struct Note
     float key;
 
     int keyPressed;
+
+    bool finished=false;
     
     Oscillator oscillator;
 
@@ -180,6 +132,64 @@ struct Note
         endTime=time;
     }
 };
+
+struct Instrument
+{
+    double volume;
+    Envelope envelope;
+    
+    virtual double sound(Note* note, double time)=0;
+};
+
+struct Bell : public Instrument
+{
+    Bell()
+    {
+        envelope = {};
+        envelope.attack = 0.01f;
+        envelope.decay = 1.0f;
+        envelope.startAmplitude = 1.0;
+        envelope.amplitude = 0.0;
+        envelope.release = 1;
+    }
+
+    virtual double sound(Note* note, double time)=0
+    {
+        double wave = 0;
+        return wave;
+    }
+};
+
+struct Harmonica : public Instrument
+{
+    Harmonica()
+    {
+        envelope = {};
+        envelope.attack = 0.002f;
+        envelope.decay = 0.1f;
+        envelope.startAmplitude = 10.0;
+        envelope.amplitude = 0.0;
+        envelope.release = 0.2;
+    }
+
+    double sound(Note* note, double time)
+    {
+        double wave = 0;
+        
+        double frequencyMultiplier=1;
+        double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished, frequencyMultiplier);
+        
+        double freqDecay = 0;
+        double frequency = note->frequency * ((1.0 - freqDecay) + (frequencyMultiplier*freqDecay));
+
+
+        wave += envelopeAmplitude * note->oscillator.SineWave(frequency);
+        
+
+        return wave;
+    }
+};
+
 
 class AudioLab;
 
