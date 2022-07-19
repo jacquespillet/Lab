@@ -113,6 +113,16 @@ double GetWave(double frequency, int waveType, double time, double LFOAmplitude,
     return wave;
 }
 
+//Takes normalized coordinates between 0 and 1
+glm::vec2 Clip::RemapEnveloppeGraph(glm::vec2 coord)
+{
+    glm::vec2 result(0,0);
+    result.x  = enveloppeCanvasPos.x + coord.x * envelopeCanvasSize.x;
+    result.y  = enveloppeCanvasPos.y + envelopeCanvasSize.y - coord.y * envelopeCanvasSize.y;
+
+    return result;
+}
+
 void Clip::RenderGUI()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -130,7 +140,7 @@ void Clip::RenderGUI()
     glUniform1i(glGetUniformLocation(piano.keysShader, "mousePressed"), (int)io.MouseDown[0]);
     glUniform1i(glGetUniformLocation(piano.keysShader, "pressedKey"), piano.currentKey);
     glUniform2fv(glGetUniformLocation(piano.keysShader, "mousePosition"), 1, glm::value_ptr(piano.mousePos));
-    glUniform2f(glGetUniformLocation(piano.keysShader, "keysWindowSize"), (float)piano.keysWidth, (float)windowHeight);
+    glUniform2f(glGetUniformLocation(piano.keysShader, "keysWindowSize"), (float)piano.keysWidth, (float)sequencerHeight);
     
     glDispatchCompute((piano.keysRenderTarget.width / 32) + 1, (piano.keysRenderTarget.height / 32) + 1, 1);
 	glUseProgram(0);
@@ -138,11 +148,10 @@ void Clip::RenderGUI()
 
     ImGuiStyle& style = ImGui::GetStyle();
     float padding = style.WindowPadding.x;
-    ImGui::SetNextWindowSize(ImVec2(piano.keysWidth + sequencer.width, windowHeight), ImGuiCond_Appearing);
-
-
-    ImGui::Begin("Keys", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
-
+    
+    ImGui::Begin("Keys", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar);
+    sequencer.width = ImGui::GetWindowWidth() - piano.keysWidth - ImGui::GetCursorPos().x;
+    
     if(ImGui::Button("Play"))
     {
         FillAudioBuffer();
@@ -169,21 +178,22 @@ void Clip::RenderGUI()
     ImGui::PopID();
 
     ImVec2 keyWindowPos = ImGui::GetCursorScreenPos();
-    ImGui::Image((ImTextureID)piano.keysRenderTarget.glTex, ImVec2(piano.keysWidth, windowHeight));
-    
+    ImGui::Image((ImTextureID)piano.keysRenderTarget.glTex, ImVec2(piano.keysWidth, sequencerHeight));
     ImGui::SameLine();
+    
 
     //Piano mouse pos
     piano.mousePos = glm::vec2(io.MousePos.x - (int)keyWindowPos.x - padding, io.MousePos.y - keyWindowPos.y);
-    if(piano.mousePos.x < 0 || piano.mousePos.y < 0 || piano.mousePos.x > piano.keysWidth || piano.mousePos.y > windowHeight)
+    if(piano.mousePos.x < 0 || piano.mousePos.y < 0 || piano.mousePos.x > piano.keysWidth || piano.mousePos.y > sequencerHeight)
     {
         piano.mousePos = glm::vec2(-1,-1);
     }
 
+
     //Sequencer mouse pos
     ImVec2 sequencePos = ImGui::GetCursorScreenPos();
     sequencer.mousePos = glm::vec2(io.MousePos.x - sequencePos.x, io.MousePos.y - sequencePos.y);
-    if(sequencer.mousePos.x < 0 || sequencer.mousePos.y < 0 || sequencer.mousePos.x > sequencer.width || sequencer.mousePos.y > windowHeight)
+    if(sequencer.mousePos.x < 0 || sequencer.mousePos.y < 0 || sequencer.mousePos.x > sequencer.width || sequencer.mousePos.y > sequencerHeight)
     {
         sequencer.mousePos = glm::vec2(-1,-1);
     }
@@ -193,7 +203,7 @@ void Clip::RenderGUI()
     if(sequencer.mousePos.x>=0)
     {
         float normalizedMousePosX = sequencer.mousePos.x / sequencer.width;
-        float normalizedMousePosY = sequencer.mousePos.y / windowHeight;
+        float normalizedMousePosY = sequencer.mousePos.y / sequencerHeight;
 
         sequencer.hoveredCellX = (int)std::floor(normalizedMousePosX * (float)numCellsVisible);
         sequencer.hoveredCellY = (int)std::floor(normalizedMousePosY * (float)numNotes);
@@ -206,11 +216,9 @@ void Clip::RenderGUI()
 
 
     
-
+#if 1
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
     const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
-
 
 
     float vertSpacing = sequencer.width/(float)numCellsVisible;
@@ -227,7 +235,7 @@ void Clip::RenderGUI()
             int second = (int)std::floor((float)(i + sequencer.startX) * sequencer.cellDuration);
             ImU32 backgroundColor = IM_COL32(120, 120, 120, 255);
             if((second+1)%2==0) backgroundColor = IM_COL32(100, 100, 100, 255);
-            draw_list->AddRectFilled(ImVec2(x, y), ImVec2(x + vertSpacing, y + windowHeight), backgroundColor);
+            draw_list->AddRectFilled(ImVec2(x, y), ImVec2(x + vertSpacing, y + sequencerHeight), backgroundColor);
         }
 
         //Line
@@ -240,12 +248,12 @@ void Clip::RenderGUI()
                 thickness = 0.3f;
             }
             
-            draw_list->AddLine(ImVec2(x, y), ImVec2(x, y + windowHeight), color, thickness);
+            draw_list->AddLine(ImVec2(x, y), ImVec2(x, y + sequencerHeight), color, thickness);
         }   
     }
 
     //Horizontal lines
-    float horizSpacing = windowHeight / 12.0f;
+    float horizSpacing = sequencerHeight / 12.0f;
     for(int i=0; i<numNotes+1; i++)
     {
         float y =canvasPos.y + (float)i * horizSpacing;
@@ -288,7 +296,7 @@ void Clip::RenderGUI()
         float endX = startX + vertSpacing * cellsCovered;
         endX -= overlap;
 
-        float startY = canvasPos.y + (key / numNotes) * windowHeight;
+        float startY = canvasPos.y + (key / numNotes) * sequencerHeight;
         float endY = startY + horizSpacing;
         if(cellX < numCellsVisible && endX >= canvasPos.x) 
         {
@@ -321,7 +329,7 @@ void Clip::RenderGUI()
     //Add note
     if(io.MouseClicked[0])
     {
-        piano.currentKey = (int)((piano.mousePos.y / windowHeight) * 12.0f);
+        piano.currentKey = (int)((piano.mousePos.y / sequencerHeight) * 12.0f);
 
         if(piano.mousePos.x>0)
         {
@@ -400,9 +408,68 @@ void Clip::RenderGUI()
         float y = canvasPos.y;
         if(x > canvasPos.x)
         {
-            draw_list->AddLine(ImVec2(x, y), ImVec2(x, y + windowHeight), IM_COL32(200, 200, 200, 255), 2);
+            draw_list->AddLine(ImVec2(x, y), ImVec2(x, y + sequencerHeight), IM_COL32(200, 200, 200, 255), 2);
         }
     }    
+
+    ImGui::InvisibleButton("##SequencerBtn", ImVec2(sequencer.width, sequencerHeight));
+    // std::cout << canvasPos.y << " " << sequencerHeight << std::endl;
+#endif
+    if(ImGui::CollapsingHeader("Enveloppe"))
+    {
+        float attack = (float)piano.instrument->envelope.attack;
+        ImGui::DragFloat("AttacK", &attack, 0.01f, 0, 10000.0f);
+        piano.instrument->envelope.attack = attack;
+
+        float decay = (float)piano.instrument->envelope.decay;
+        ImGui::DragFloat("Decay", &decay, 0.01f, 0, 10000.0f);
+        piano.instrument->envelope.decay = decay;
+
+        float release = (float)piano.instrument->envelope.release;
+        ImGui::DragFloat("Release", &release, 0.01f, 0, 10000.0f);
+        piano.instrument->envelope.release = release;
+        
+        float startAmplitude = (float)piano.instrument->envelope.startAmplitude;
+        ImGui::DragFloat("Start Amplitude", &startAmplitude, 0.01f, 0, 10000.0f);
+        piano.instrument->envelope.startAmplitude = startAmplitude;
+        
+        float amplitude = (float)piano.instrument->envelope.amplitude;
+        ImGui::DragFloat("Amplitude", &amplitude, 0.01f, 0, 10000.0f);
+        piano.instrument->envelope.amplitude = amplitude;
+
+
+        float totalDuration = attack + decay + 4.0f + release;
+        float maxAmplitude = (std::max)(startAmplitude, amplitude);
+
+        ImVec2 ImEnveloppeCanvasPos = ImGui::GetCursorScreenPos();
+        enveloppeCanvasPos = glm::vec2(ImEnveloppeCanvasPos.x, ImEnveloppeCanvasPos.y);
+
+        draw_list->AddRect(ImEnveloppeCanvasPos, ImVec2(enveloppeCanvasPos.x + envelopeCanvasSize.x, enveloppeCanvasPos.y + envelopeCanvasSize.y), IM_COL32(255, 255, 255, 255));
+        ImGui::InvisibleButton("enveloppeCanvas", ImVec2(envelopeCanvasSize.x, envelopeCanvasSize.y));
+
+        glm::vec2 origin(enveloppeCanvasPos.x, enveloppeCanvasPos.y + envelopeCanvasSize.y);
+        glm::vec2 size(envelopeCanvasSize.x, -envelopeCanvasSize.y);
+
+        glm::vec2 attackLineStart(0,0);
+        glm::vec2 attackLineEnd = glm::vec2(attack/totalDuration, startAmplitude/maxAmplitude);
+        glm::vec2 remappedAttackLineStart = RemapEnveloppeGraph(attackLineStart);
+        glm::vec2 remappedAttackLineEnd = RemapEnveloppeGraph(attackLineEnd);
+        draw_list->AddLine(ImVec2(remappedAttackLineStart.x, remappedAttackLineStart.y), ImVec2(remappedAttackLineEnd.x, remappedAttackLineEnd.y), IM_COL32(255,255,255,255), 0.1f);
+        
+        glm::vec2 decayLineEnd = glm::vec2(attackLineEnd.x + (decay/totalDuration), amplitude/maxAmplitude);
+        glm::vec2 remappedDecayLineEnd = RemapEnveloppeGraph(decayLineEnd);
+        draw_list->AddLine(ImVec2(remappedAttackLineEnd.x, remappedAttackLineEnd.y), ImVec2(remappedDecayLineEnd.x, remappedDecayLineEnd.y), IM_COL32(255,255,255,255), 0.1f);
+        
+        glm::vec2 noteLineEnd = glm::vec2(decayLineEnd.x + (4.0f/totalDuration), amplitude/maxAmplitude);
+        glm::vec2 remappedNoteLineEnd = RemapEnveloppeGraph(noteLineEnd);
+        draw_list->AddLine(ImVec2(remappedDecayLineEnd.x, remappedDecayLineEnd.y), ImVec2(remappedNoteLineEnd.x, remappedNoteLineEnd.y), IM_COL32(255,255,255,255), 0.1f);
+        
+        glm::vec2 releaseLineEnd(noteLineEnd.x + (release/totalDuration), 0);
+        glm::vec2 remappedReleaseLineEnd = RemapEnveloppeGraph(releaseLineEnd);
+        draw_list->AddLine(ImVec2(remappedNoteLineEnd.x,remappedNoteLineEnd.y), ImVec2(remappedReleaseLineEnd.x, remappedReleaseLineEnd.y), IM_COL32(255,255,255,255), 0.1f);
+
+    }
+
     ImGui::End();
 }
 

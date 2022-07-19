@@ -236,7 +236,8 @@ struct Clip
         float resizeNoteDirection;
     } sequencer;
     
-    float windowHeight=512;
+    float sequencerHeight=512;
+    float windowHeight;
     int numNotes=12;
 
     void RenderGUI();
@@ -246,6 +247,10 @@ struct Clip
     void MouseRelease();
 
     double Sound(double time);
+    
+    glm::vec2 enveloppeCanvasPos;
+    glm::vec2 envelopeCanvasSize = glm::vec2(256, 256);
+    glm::vec2 RemapEnveloppeGraph(glm::vec2 coord);
 
     std::unordered_map<uint32_t, Note> recordedNotes;
     std::vector<double> soundBuffer;
