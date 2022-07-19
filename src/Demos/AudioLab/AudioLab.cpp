@@ -124,6 +124,7 @@ double Instrument::sound(Note* note, double time)
 {
     double wave = 0;
     
+
     double frequencyMultiplier=1;
     double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished, &frequencyMultiplier);
     for(int i=0; i<numNotes; i++)
@@ -131,7 +132,6 @@ double Instrument::sound(Note* note, double time)
         double frequency = doFrequencyDecay ? note->frequency * ((1.0 - envelope.frequencyDecay) + (frequencyMultiplier*envelope.frequencyDecay)) : note->frequency;
         wave += waveParams[i].amplitudeModulation * envelopeAmplitude * note->oscillators[i].SineWave(frequency * waveParams[i].frequencyModulation);
     }
-
     return wave;
 }    
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -483,7 +483,7 @@ void Clip::RenderGUI()
 
         if(piano.mousePos.x>0)
         {
-            piano.note.frequency = CalcFrequency(2, (float)piano.currentKey);
+            piano.note.frequency = CalcFrequency(3, (float)piano.currentKey);
             piano.note.Press(player->sound->GetTime());
         }
 
@@ -674,6 +674,7 @@ void AudioLab::Load() {
     clips[0] = Clip();
     clips[0].piano.instrument = new Harmonica();
     clips[0].piano.note.instrument = clips[0].piano.instrument;
+    clips[0].piano.note.oscillators.resize(clips[0].piano.instrument->numNotes);
     clips[0].player = &audioPlayer;
     
     std::vector<std::string> devices = olcNoiseMaker<short>::Enumerate();
