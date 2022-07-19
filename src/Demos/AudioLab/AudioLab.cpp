@@ -271,7 +271,27 @@ double GetWave(double frequency, int waveType, double time, double LFOAmplitude,
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Clip::Clip()
 {
+    initialized=true;
+}
+Clip::Clip(AudioPlayer *audioPlayer)
+{
     piano.note = Note();
+    piano.instrument = new Harmonica();
+    piano.note.instrument = piano.instrument;
+    piano.note.oscillators.resize(piano.instrument->numNotes);
+    player = audioPlayer;
+    initialized=true;    
+
+    
+    TextureCreateInfo tci = {};
+    tci.generateMipmaps =false;
+    tci.srgb=true;
+    tci.minFilter = GL_LINEAR;
+    tci.magFilter = GL_LINEAR;
+    tci.flip=false;
+    piano.keysRenderTarget = GL_TextureFloat(256, 2048, tci);
+    piano.keysTexture = GL_Texture("resources/AudioLab/keys.png", tci);
+    CreateComputeShader("shaders/AudioLab/keys.glsl", &piano.keysShader);   
 }
 void Clip::RenderGUI()
 {
@@ -656,7 +676,10 @@ double AudioLab::Noise(double time)
         notes.erase(notes.begin() + finishedIndices[i]);
     }
 
-    result += clips[0].Sound(time);
+    for(int i=0; i<clips.size(); i++)
+    {
+        result += clips[i].Sound(time);
+    }
 
 
 
@@ -670,12 +693,9 @@ AudioLab::AudioLab() {
 }
 
 void AudioLab::Load() {
-    clips.resize(1);
-    clips[0] = Clip();
-    clips[0].piano.instrument = new Harmonica();
-    clips[0].piano.note.instrument = clips[0].piano.instrument;
-    clips[0].piano.note.oscillators.resize(clips[0].piano.instrument->numNotes);
-    clips[0].player = &audioPlayer;
+    clips.resize(2);
+    clips[0] = Clip(&audioPlayer);
+    clips[1] = Clip(&audioPlayer);
     
     std::vector<std::string> devices = olcNoiseMaker<short>::Enumerate();
     audioPlayer.sound = new olcNoiseMaker<short>(devices[0], audioPlayer.sampleRate, 1, 8, 512);
@@ -688,16 +708,8 @@ void AudioLab::Load() {
         frequencies[i] = CalcFrequency(3, (float)i);
     }
 
-    TextureCreateInfo tci = {};
-    tci.generateMipmaps =false;
-    tci.srgb=true;
-    tci.minFilter = GL_LINEAR;
-    tci.magFilter = GL_LINEAR;
-    tci.flip=false;
-    clips[0].piano.keysRenderTarget = GL_TextureFloat(256, 2048, tci);
-    clips[0].piano.keysTexture = GL_Texture("resources/AudioLab/keys.png", tci);
 
-    CreateComputeShader("shaders/AudioLab/keys.glsl", &clips[0].piano.keysShader);   
+    
 }
 
 
@@ -706,7 +718,7 @@ void AudioLab::Load() {
 void AudioLab::RenderGUI() {
     ImGui::DragFloat("Amplitude", &audioPlayer.amplitude, 0.01f, 0, 1);
     
-    clips[0].RenderGUI();
+    clips[currentClip].RenderGUI();
 }
 
 void AudioLab::Render() 
@@ -723,11 +735,11 @@ void AudioLab::MouseMove(float x, float y) {
 }
 
 void AudioLab::LeftClickDown() {
-    clips[0].MousePress();
+    clips[currentClip].MousePress();
 }
 
 void AudioLab::LeftClickUp() {
-    clips[0].MouseRelease();
+    clips[currentClip].MouseRelease();
 }
 
 void AudioLab::RightClickDown() {
@@ -745,7 +757,7 @@ void AudioLab::Key(int keyCode, int action)
             if(action==1)
             {
                 notes.push_back(
-                    Note(audioPlayer.sound->GetTime(), frequencies[i], keyCode, clips[0].piano.instrument)
+                    Note(audioPlayer.sound->GetTime(), frequencies[i], keyCode, clips[currentClip].piano.instrument)
                 );
             }
             else if(action==0)

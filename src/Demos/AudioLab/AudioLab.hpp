@@ -263,6 +263,7 @@ struct AudioPlayer
 
 struct Clip
 {
+    Clip(AudioPlayer *audioPlayer);
     Clip();
     struct {
         GL_TextureFloat keysRenderTarget;
@@ -318,6 +319,8 @@ struct Clip
 
     bool playing=false;
     uint64_t playingSample=0;
+
+    bool initialized=false;
     
 };
 
@@ -346,6 +349,7 @@ public :
 
     double Noise(double t);
 
+    int currentClip=0;
     std::vector<Clip> clips;
     
     //Used for keyboard input...
