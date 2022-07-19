@@ -346,8 +346,7 @@ public :
 
     double Noise(double t);
 
-    Clip synthClip;
-
+    std::vector<Clip> clips;
     
     //Used for keyboard input...
     std::array<int, 12> keys = 

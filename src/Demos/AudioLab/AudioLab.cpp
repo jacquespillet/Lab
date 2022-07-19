@@ -593,7 +593,6 @@ double Clip::Sound(double time)
     }
     
 
-
     if(playing)
     {
         if(playingSample > soundBuffer.size()-1) 
@@ -657,7 +656,8 @@ double AudioLab::Noise(double time)
         notes.erase(notes.begin() + finishedIndices[i]);
     }
 
-    result += synthClip.Sound(time);
+    result += clips[0].Sound(time);
+
 
 
     result *= audioPlayer.amplitude;
@@ -670,9 +670,11 @@ AudioLab::AudioLab() {
 }
 
 void AudioLab::Load() {
-    synthClip = Clip();
-    synthClip.piano.instrument = new Harmonica();
-    synthClip.player = &audioPlayer;
+    clips.resize(1);
+    clips[0] = Clip();
+    clips[0].piano.instrument = new Harmonica();
+    clips[0].piano.note.instrument = clips[0].piano.instrument;
+    clips[0].player = &audioPlayer;
     
     std::vector<std::string> devices = olcNoiseMaker<short>::Enumerate();
     audioPlayer.sound = new olcNoiseMaker<short>(devices[0], audioPlayer.sampleRate, 1, 8, 512);
@@ -691,10 +693,10 @@ void AudioLab::Load() {
     tci.minFilter = GL_LINEAR;
     tci.magFilter = GL_LINEAR;
     tci.flip=false;
-    synthClip.piano.keysRenderTarget = GL_TextureFloat(256, 2048, tci);
-    synthClip.piano.keysTexture = GL_Texture("resources/AudioLab/keys.png", tci);
+    clips[0].piano.keysRenderTarget = GL_TextureFloat(256, 2048, tci);
+    clips[0].piano.keysTexture = GL_Texture("resources/AudioLab/keys.png", tci);
 
-    CreateComputeShader("shaders/AudioLab/keys.glsl", &synthClip.piano.keysShader);   
+    CreateComputeShader("shaders/AudioLab/keys.glsl", &clips[0].piano.keysShader);   
 }
 
 
@@ -703,8 +705,7 @@ void AudioLab::Load() {
 void AudioLab::RenderGUI() {
     ImGui::DragFloat("Amplitude", &audioPlayer.amplitude, 0.01f, 0, 1);
     
-    synthClip.RenderGUI();
-
+    clips[0].RenderGUI();
 }
 
 void AudioLab::Render() 
@@ -721,11 +722,11 @@ void AudioLab::MouseMove(float x, float y) {
 }
 
 void AudioLab::LeftClickDown() {
-    synthClip.MousePress();
+    clips[0].MousePress();
 }
 
 void AudioLab::LeftClickUp() {
-    synthClip.MouseRelease();
+    clips[0].MouseRelease();
 }
 
 void AudioLab::RightClickDown() {
@@ -743,7 +744,7 @@ void AudioLab::Key(int keyCode, int action)
             if(action==1)
             {
                 notes.push_back(
-                    Note(audioPlayer.sound->GetTime(), frequencies[i], keyCode, synthClip.piano.instrument)
+                    Note(audioPlayer.sound->GetTime(), frequencies[i], keyCode, clips[0].piano.instrument)
                 );
             }
             else if(action==0)
