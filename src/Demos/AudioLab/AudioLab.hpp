@@ -34,6 +34,12 @@ struct Graph
 
 struct Oscillator
 {
+    Oscillator() 
+    {
+        phase=0;
+        sampleRate=44100;
+        time=0;
+    }
     double SineWave(double frequency);
     double phase=0;
     double sampleRate = 44100;
@@ -131,10 +137,14 @@ struct Instrument
         WaveType waveType;
     };
     std::vector<WaveParams> waveParams;
-    
-    virtual double sound(Note* note, double time)=0;
 
+    bool doFrequencyDecay=false;
+    
+    double sound(Note* note, double time);
     void RenderGui(ImDrawList* draw_list);
+
+    Graph waveGraph;
+    float scaleX=35;
 };
 
 struct Note
@@ -152,19 +162,23 @@ struct Note
     std::vector<Oscillator> oscillators;
 
     Note(){
-        oscillators.resize(1);
+        Oscillator osc;
+        oscillators.resize(1, osc);
     }
     
     Note(double startTime, double endTime, float key, Instrument *instrument) : frequency(frequency), startTime(startTime), endTime(endTime), key(key), instrument(instrument)
     {
         frequency = CalcFrequency(3, key);
-        oscillators.resize(instrument->numNotes);
+        
+        Oscillator osc;
+        oscillators.resize(instrument->numNotes, osc);
     }
 
     Note(double time, double frequency, int keyPressed, Instrument *instrument) : frequency(frequency), keyPressed(keyPressed), endTime(-1), instrument(instrument)
     {
         Press(time);
-        oscillators.resize(instrument->numNotes);
+        Oscillator osc;
+        oscillators.resize(instrument->numNotes, osc);
     }
 
     void Press(double time)
@@ -191,12 +205,10 @@ struct Bell : public Instrument
         envelope.release = 1;
 
         numNotes=1;
-    }
 
-    virtual double sound(Note* note, double time)=0
-    {
-        double wave = 0;
-        return wave;
+        waveParams = {
+            {1,1, WaveType::Sine}
+        };
     }
 };
 
@@ -220,33 +232,6 @@ struct Harmonica : public Instrument
         waveParams[1].amplitudeModulation = 3;
         waveParams[1].frequencyModulation = 0.5;
     }
-
-    double sound(Note* note, double time)
-    {
-        double wave = 0;
-        
-        double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished);
-        for(int i=0; i<numNotes; i++)
-        {
-            wave += waveParams[i].amplitudeModulation * envelopeAmplitude * note->oscillators[i].SineWave(note->frequency * waveParams[i].frequencyModulation);
-        }
-
-        //for(int i=0; i<numNotes; i++)
-        //DRUM
-        // {
-        //     double frequencyMultiplier=1;
-        //     double frequency = note->frequency * ((1.0 - envelope.frequencyDecay) + (frequencyMultiplier*envelope.frequencyDecay));
-        //     wave += envelopeAmplitude * note->oscillators[i].SineWave(frequency);
-        // }
-        
-        //
-        // double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished);
-        // wave += envelopeAmplitude * note->oscillators[0].SineWave(note->frequency);
-        // wave += 0.25 * envelopeAmplitude * note->oscillators[1].SineWave(note->frequency * 2);
-    
-
-        return wave;
-    }
 };
 
 struct Drum : public Instrument
@@ -263,19 +248,6 @@ struct Drum : public Instrument
 
         numNotes=1;
     }
-
-    double sound(Note* note, double time)
-    {
-        double wave = 0;
-        
-        {
-            double frequencyMultiplier=1;
-            double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished, &frequencyMultiplier);
-            double frequency = note->frequency * ((1.0 - envelope.frequencyDecay) + (frequencyMultiplier*envelope.frequencyDecay));
-            wave += envelopeAmplitude * note->oscillators[0].SineWave(frequency);
-        }
-        return wave;
-    }
 };
 
 
@@ -291,6 +263,7 @@ struct AudioPlayer
 
 struct Clip
 {
+    Clip();
     struct {
         GL_TextureFloat keysRenderTarget;
         GL_Texture keysTexture;

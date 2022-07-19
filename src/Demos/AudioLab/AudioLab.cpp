@@ -80,22 +80,60 @@ void Instrument::RenderGui(ImDrawList* draw_list)
         {
             bool numNotesChanged = ImGui::SliderInt("Number of waves", &numNotes, 1, 8);
             if(numNotesChanged) waveParams.resize(numNotes);
+            
+            bool graphParamsChanged=false;
+            double totalAmplitude=0;
             for(int i=0; i<waveParams.size(); i++)
             {
                 ImGui::Text("Wave %d", i);
                 ImGui::PushID(i*2 + 0);
-                    ImGui::SliderFloat("Amplitude Modulation", &waveParams[i].amplitudeModulation, 0, 3);
+                    graphParamsChanged |= ImGui::SliderFloat("Amplitude Modulation", &waveParams[i].amplitudeModulation, 0, 3);
                 ImGui::PopID();
                 
                 ImGui::PushID(i*2 + 1);
-                    ImGui::SliderFloat("Frequency Modulation", &waveParams[i].frequencyModulation, 0, 10);
+                    graphParamsChanged |= ImGui::SliderFloat("Frequency Modulation", &waveParams[i].frequencyModulation, 0, 10);
                 ImGui::PopID();
+
+                totalAmplitude += waveParams[i].amplitudeModulation;
             }
+            graphParamsChanged |= ImGui::DragFloat("ScaleX", &scaleX, 1, 0, 40);
+
+            ImVec2 enveloppeCanvasPos = ImGui::GetCursorScreenPos();
+            waveGraph.origin = glm::vec2(enveloppeCanvasPos.x, enveloppeCanvasPos.y);
+            waveGraph.size = glm::vec2(256,256);
+            if(graphParamsChanged || waveGraph.points.size()==0)
+            {
+                waveGraph.points.resize(256);
+                Note note(0, CalcFrequency(3,scaleX), 0, this);
+                double maxAmplitude = (std::max)(envelope.amplitude, envelope.startAmplitude) * totalAmplitude;
+                for(int i=0; i<waveGraph.points.size(); i++)
+                {
+                    float t = (float)i / (float)waveGraph.points.size();
+                    double s = ((sound(&note, t * TWO_PI * scaleX)) / maxAmplitude) * 0.5 + 0.5;
+                    waveGraph.points[i] = glm::vec2(t, s);
+                }
+            }
+            waveGraph.Render(draw_list);
 
             ImGui::TreePop();
         }
     }
 }
+
+double Instrument::sound(Note* note, double time)
+{
+    double wave = 0;
+    
+    double frequencyMultiplier=1;
+    double envelopeAmplitude = envelope.GetAmplitude(time, note->startTime, note->endTime, note->finished, &frequencyMultiplier);
+    for(int i=0; i<numNotes; i++)
+    {
+        double frequency = doFrequencyDecay ? note->frequency * ((1.0 - envelope.frequencyDecay) + (frequencyMultiplier*envelope.frequencyDecay)) : note->frequency;
+        wave += waveParams[i].amplitudeModulation * envelopeAmplitude * note->oscillators[i].SineWave(frequency * waveParams[i].frequencyModulation);
+    }
+
+    return wave;
+}    
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -184,7 +222,7 @@ double HertzToRadians(double hertz)
     return hertz * 2.0f * PI;
 }
 
-double Oscillator(void *objectPointer, double time)
+double MakeSound(void *objectPointer, double time)
 {
     AudioLab *audioLab = (AudioLab*)objectPointer;
     return audioLab->Noise(time);
@@ -231,6 +269,10 @@ double GetWave(double frequency, int waveType, double time, double LFOAmplitude,
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+Clip::Clip()
+{
+    piano.note = Note();
+}
 void Clip::RenderGUI()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -601,13 +643,20 @@ double AudioLab::Noise(double time)
     double result=0;
     double weight = 1.0f / (double)notes.size();
     weight=1;
+
+    std::vector<int> finishedIndices;
 	for(int i = (int)notes.size() - 1; i >= 0; i--)
     {
         double wave = notes[i].instrument->sound(&notes[i], time);
-        if(notes[i].finished) notes.erase(notes.begin() + i);
+        if(notes[i].finished) finishedIndices.push_back(i); 
         result += wave;
     }
     
+    for(int i = (int)finishedIndices.size()-1; i>=0; i--)
+    {
+        notes.erase(notes.begin() + finishedIndices[i]);
+    }
+
     result += synthClip.Sound(time);
 
 
@@ -621,7 +670,7 @@ AudioLab::AudioLab() {
 }
 
 void AudioLab::Load() {
-    
+    synthClip = Clip();
     synthClip.piano.instrument = new Harmonica();
     synthClip.player = &audioPlayer;
     
@@ -629,7 +678,7 @@ void AudioLab::Load() {
     audioPlayer.sound = new olcNoiseMaker<short>(devices[0], audioPlayer.sampleRate, 1, 8, 512);
     audioPlayer.timeStep = 1.0 / (double)audioPlayer.sampleRate;
 
-    audioPlayer.sound->SetUserFunction(Oscillator, (void*)this);
+    audioPlayer.sound->SetUserFunction(MakeSound, (void*)this);
 
     for(int i=0; i<frequencies.size(); i++)
     {
