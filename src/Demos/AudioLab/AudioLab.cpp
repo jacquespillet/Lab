@@ -277,7 +277,7 @@ Clip::Clip()
 {
     initialized=true;
 }
-Clip::Clip(AudioPlayer *audioPlayer)
+Clip::Clip(AudioPlayer *audioPlayer, Arrangement* arrangement) : arrangement(arrangement)
 {
     piano.note = Note();
     piano.instrument = new Harmonica();
@@ -331,16 +331,15 @@ void Clip::RenderPianoView()
         FillAudioBuffer();
     }
 
-    ImGui::DragFloat("Duration", &sequencer.recordDuration, 0.1f, 1, 500);
-    ImGui::Separator();
+
     
     ImGui::PushID(0);
     ImGui::SetCursorPosX(ImGui::GetCursorPosX()+ piano.keysWidth);
     ImGui::DragFloat("", &sequencer.zoomX, 0.1f, 0.1f, 10000, "Zoom (Drag)");
     ImGui::PopID();
 
-    int numCellsVisible = (int)((sequencer.recordDuration / sequencer.zoomX) / sequencer.cellDuration);
-    int totalCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
+    int numCellsVisible = (int)((arrangement->recordDuration / sequencer.zoomX) / sequencer.cellDuration);
+    int totalCells = (int)(arrangement->recordDuration / sequencer.cellDuration);
     numCellsVisible = (std::min)(numCellsVisible, totalCells);
 
     int difference = totalCells - numCellsVisible;
@@ -491,7 +490,7 @@ void Clip::RenderPianoView()
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
                 
                 //Set the note candidate hash and the direction
-                int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
+                int numCells = (int)(arrangement->recordDuration / sequencer.cellDuration);
                 float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
                 int noteHash = (int)std::ceil(sequencer.hoveredCellY * numCells + correctedXPosition);
                 sequencer.resizeNoteHash = noteHash;
@@ -511,14 +510,14 @@ void Clip::RenderPianoView()
             piano.note.Press(player->sound->GetTime());
         }
 
-        int numCells = (int)(sequencer.recordDuration / sequencer.cellDuration);
+        int numCells = (int)(arrangement->recordDuration / sequencer.cellDuration);
         
         //Check that we're not resizing as well
         if(sequencer.mousePos.x > 0 && sequencer.resizeNoteHash==-1)
         {
             float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX;
-            float startTime = ((float)(correctedXPosition) / (float)numCells) * sequencer.recordDuration;
-            float endTime = startTime + (sequencer.recordDuration / numCells);
+            float startTime = ((float)(correctedXPosition) / (float)numCells) * arrangement->recordDuration;
+            float endTime = startTime + (arrangement->recordDuration / numCells);
             float key = ((float)sequencer.hoveredCellY / (float)numNotes) * 12;
 
             int hash = (int)(sequencer.hoveredCellY * numCells + correctedXPosition);
@@ -550,7 +549,7 @@ void Clip::RenderPianoView()
             
             
             float correctedXPosition = sequencer.hoveredCellX + (float)sequencer.startX; //position of the hovered cell, taking startX into account
-            float time = ((float)(correctedXPosition) / (float)totalCells) * sequencer.recordDuration; //Time between 0 and recordDuration
+            float time = ((float)(correctedXPosition) / (float)totalCells) * arrangement->recordDuration; //Time between 0 and recordDuration
             
             //Change the note time
             if(sequencer.resizeNoteDirection > 0)recordedNotes[sequencer.resizeNoteHash].endTime = time;
@@ -634,7 +633,7 @@ double Clip::Sound(double time)
 void Clip::FillAudioBuffer()
 {
     soundBuffer.clear();
-    soundBuffer.resize((size_t)player->sampleRate * (size_t)sequencer.recordDuration);
+    soundBuffer.resize((size_t)player->sampleRate * (size_t)arrangement->recordDuration);
     double time=0;
     double deltaTime = 1.0 / player->sampleRate;
     for(size_t i=0; i<soundBuffer.size(); i++)
@@ -655,6 +654,25 @@ void Clip::FillAudioBuffer()
 
     playing=true;
     playingSample=0;
+}
+
+void Clip::AddToAudioBuffer(std::vector<double> externalSoundBuffer)
+{
+    double time=0;
+    double deltaTime = 1.0 / player->sampleRate;
+    for(size_t i=0; i<externalSoundBuffer.size(); i++)
+    {
+        double result=0;
+        // double weight = 1.0 / recordedNotes.size();
+        for (auto &note : recordedNotes)
+        {
+            double wave = note.second.instrument->sound(&note.second, time);
+            result += wave;         
+        }
+        
+        externalSoundBuffer[i] += result;
+        time += deltaTime;
+    }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -680,9 +698,9 @@ double AudioLab::Noise(double time)
         notes.erase(notes.begin() + finishedIndices[i]);
     }
 
-    for(int i=0; i<clips.size(); i++)
+    for(int i=0; i<arrangement.clips.size(); i++)
     {
-        result += clips[i].Sound(time);
+        result += arrangement.clips[i].Sound(time);
     }
 
     result *= audioPlayer.amplitude;
@@ -695,9 +713,9 @@ AudioLab::AudioLab() {
 }
 
 void AudioLab::Load() {
-    clips.resize(2);
-    clips[0] = Clip(&audioPlayer);
-    clips[1] = Clip(&audioPlayer);
+    arrangement.clips.resize(2);
+    arrangement.clips[0] = Clip(&audioPlayer, &arrangement);
+    arrangement.clips[1] = Clip(&audioPlayer, &arrangement);
     
     std::vector<std::string> devices = olcNoiseMaker<short>::Enumerate();
     audioPlayer.sound = new olcNoiseMaker<short>(devices[0], audioPlayer.sampleRate, 1, 8, 512);
@@ -727,15 +745,48 @@ void AudioLab::RenderGUI() {
     window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
     ImGui::Begin("AudioLab", nullptr, window_flags);
     ImGui::DragFloat("Amplitude", &audioPlayer.amplitude, 0.01f, 0, 1);
-    
-
     ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
     ImGuiID dockspace_id = ImGui::GetID("AudioLabDockSpace");
     ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
-
-    clips[currentClip].RenderPianoView();
     
-    clips[currentClip].piano.instrument->RenderGui();
+    ImGui::Begin("Clips");
+    ImGui::DragFloat("Duration", &arrangement.recordDuration, 0.1f, 1, 500);
+    ImGui::Separator();
+    if(ImGui::Button("Play"))
+    {
+        soundBuffer.clear();
+        // soundBuffer.resize((size_t)audioPlayer.sampleRate * (size_t)clips[i].sequencer.recordDuration);
+        for(int i=0; i<arrangement.clips.size(); i++)
+        {
+
+        }
+    }
+    int clipPreviewHeight = 100;
+    ImVec2 regionAvailable = ImGui::GetContentRegionAvail();
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+    for(int i=0; i<arrangement.clips.size(); i++)
+    {
+        std::string name = "Clips" + std::to_string(i);
+        if(ImGui::CollapsingHeader(name.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImVec2 cursorPos = ImGui::GetCursorScreenPos();
+            ImVec2 startPos(cursorPos.x, cursorPos.y);
+            ImVec2 endPos(cursorPos.x + regionAvailable.x, cursorPos.y + clipPreviewHeight);
+            drawList->AddRectFilled(startPos, endPos, IM_COL32(200,200,200,200));
+            ImGui::PushID(i);
+                if(ImGui::InvisibleButton("", ImVec2(regionAvailable.x, (float)clipPreviewHeight)))
+                {
+                    arrangement.currentClip=i;
+                }
+            ImGui::PopID();
+        }
+    }
+    ImGui::End();
+
+    arrangement.clips[arrangement.currentClip].RenderPianoView();    
+    arrangement.clips[arrangement.currentClip].piano.instrument->RenderGui();
+
+    
     ImGui::End();
 }
 
@@ -753,11 +804,11 @@ void AudioLab::MouseMove(float x, float y) {
 }
 
 void AudioLab::LeftClickDown() {
-    clips[currentClip].MousePress();
+    arrangement.clips[arrangement.currentClip].MousePress();
 }
 
 void AudioLab::LeftClickUp() {
-    clips[currentClip].MouseRelease();
+    arrangement.clips[arrangement.currentClip].MouseRelease();
 }
 
 void AudioLab::RightClickDown() {
@@ -775,7 +826,7 @@ void AudioLab::Key(int keyCode, int action)
             if(action==1)
             {
                 notes.push_back(
-                    Note(audioPlayer.sound->GetTime(), frequencies[i], keyCode, clips[currentClip].piano.instrument)
+                    Note(audioPlayer.sound->GetTime(), frequencies[i], keyCode, arrangement.clips[arrangement.currentClip].piano.instrument)
                 );
             }
             else if(action==0)

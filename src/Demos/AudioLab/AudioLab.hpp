@@ -252,6 +252,7 @@ struct Drum : public Instrument
 
 
 class AudioLab;
+struct Arrangement;
 
 struct AudioPlayer
 {
@@ -263,7 +264,7 @@ struct AudioPlayer
 
 struct Clip
 {
-    Clip(AudioPlayer *audioPlayer);
+    Clip(AudioPlayer *audioPlayer, Arrangement *arrangement);
     Clip();
     struct {
         GL_TextureFloat keysRenderTarget;
@@ -288,8 +289,7 @@ struct Clip
         int hoveredCellY;
         
         float cellDuration = 0.125f;
-        float recordDuration=5;
-
+        
         float zoomX = 1;
         int startX = 0;
 
@@ -305,6 +305,7 @@ struct Clip
     void RenderPianoView();
     void RenderInstrumentProperties();
     void FillAudioBuffer();
+    void AddToAudioBuffer(std::vector<double> externalSoundBuffer);
 
     void MousePress();
     void MouseRelease();
@@ -322,7 +323,16 @@ struct Clip
     uint64_t playingSample=0;
 
     bool initialized=false;
+
+    Arrangement *arrangement;
     
+};
+
+struct Arrangement
+{
+    int currentClip=0;
+    std::vector<Clip> clips;
+    float recordDuration=5;
 };
 
 class AudioLab : public Demo {
@@ -350,8 +360,7 @@ public :
 
     double Noise(double t);
 
-    int currentClip=0;
-    std::vector<Clip> clips;
+    Arrangement arrangement;
     
     //Used for keyboard input...
     std::array<int, 12> keys = 
@@ -372,7 +381,7 @@ public :
     std::array<double, 12> frequencies;
     std::vector<Note> notes;
 
-    void PlaySequencer();
+    std::vector<double> soundBuffer;
 
     AudioPlayer audioPlayer;
 private:
