@@ -22,12 +22,9 @@
 //  add reverb https://blog.demofox.org/2015/03/17/diy-synth-multitap-reverb/
 //  add convolution reverb https://blog.demofox.org/2015/03/23/diy-synth-convolution-reverb-1d-discrete-convolution-of-audio-samples/
 //  Implement other types of wave from maximilian :
-//      coswave
 //      phasor
 //      phasorBetween
-//      saw
 //      triangle
-//      square
 //      pulse
 //      impulse
 //      noise
@@ -80,23 +77,34 @@ void Instrument::RenderGui()
         envelope.RenderGui(draw_list);
         if(ImGui::TreeNode("Waves"))
         {
+            bool graphParamsChanged=false;
+
             bool numNotesChanged = ImGui::SliderInt("Number of waves", &numNotes, 1, 8);
             if(numNotesChanged) waveParams.resize(numNotes);
+
+            graphParamsChanged |= numNotesChanged;
             
-            bool graphParamsChanged=false;
+            ImGui::Separator();
+            
             double totalAmplitude=0;
             for(int i=0; i<waveParams.size(); i++)
             {
-                ImGui::Text("Wave %d", i);
-                ImGui::PushID(i*2 + 0);
+                ImGui::Text("Wave %d", i); ImGui::SameLine();
+                
+                ImGui::PushID(i * 2 + 0);
+                    graphParamsChanged |= ImGui::Combo("Wave Type", (int*)&waveParams[i].waveType, "Sine\0Cosine\0Saw\0Triangle\0Square\0Noise\0Impulse\0Sawn\0Rect\0\0");
+                ImGui::PopID();
+
+                ImGui::PushID(i*2 + 1);
                     graphParamsChanged |= ImGui::DragFloat("Amplitude Modulation", &waveParams[i].amplitudeModulation, 0.1f, 0, 100);
                 ImGui::PopID();
                 
-                ImGui::PushID(i*2 + 1);
+                ImGui::PushID(i*2 + 2);
                     graphParamsChanged |= ImGui::SliderFloat("Frequency Modulation", &waveParams[i].frequencyModulation, 0, 10);
                 ImGui::PopID();
 
                 totalAmplitude += waveParams[i].amplitudeModulation;
+                ImGui::Separator();
             }
             graphParamsChanged |= ImGui::DragFloat("ScaleX", &scaleX, 1, 0, 40);
 
@@ -136,7 +144,7 @@ double Instrument::sound(Note* note, double time)
     for(int i=0; i<numNotes; i++)
     {
         double frequency = doFrequencyDecay ? note->frequency * ((1.0 - envelope.frequencyDecay) + (frequencyMultiplier*envelope.frequencyDecay)) : note->frequency;
-        wave += waveParams[i].amplitudeModulation * envelopeAmplitude * note->oscillators[i].SineWave(frequency * waveParams[i].frequencyModulation);
+        wave += waveParams[i].amplitudeModulation * envelopeAmplitude * note->oscillators[i].Wave(frequency * waveParams[i].frequencyModulation, waveParams[i].waveType);
     }
     return wave;
 }    
@@ -206,14 +214,128 @@ void Envelope::RenderGui(ImDrawList* draw_list)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 double Oscillator::SineWave(double frequency)
 {
+	double result=sin (phase*(TWO_PI));
+
+	if ( phase >= 1.0 ) phase -= 1.0;
+	phase += (1.0/(sampleRate/(frequency)));
+
+	return(result);    
+}
+
+double Oscillator::CosineWave(double frequency)
+{
+	double result=cos (phase*(TWO_PI));
+
+	if ( phase >= 1.0 ) phase -= 1.0;
+	phase += (1.0/(sampleRate/(frequency)));
+
+	return(result);   
+}
+double Oscillator::SawWave(double frequency)
+{
     double result=0;
-    phase += TWO_PI * frequency/sampleRate;
-    while(phase >= TWO_PI)
-        phase -= TWO_PI;
-    while(phase < 0)
-        phase += TWO_PI;
-    result = sin(phase);
-    return result;
+	result=phase;
+	if ( phase >= 1.0 ) phase -= 2.0;
+	phase += (1.0/(sampleRate/(frequency))) * 2.0;
+	return(result);    
+}
+double Oscillator::TriangleWave(double frequency)
+{
+    double result=0;
+	if ( phase >= 1.0 ) phase -= 1.0;
+	phase += (1./(sampleRate/(frequency)));
+
+	if (phase <= 0.5 ) {
+		result =(phase - 0.25) * 4;
+	} else {
+		result =((1.0-phase) - 0.25) * 4;
+	}
+	return(result);    
+}
+double Oscillator::SquareWave(double frequency)
+{
+    double result=0;
+	if (phase<0.5) result=-1;
+	if (phase>0.5) result=1;
+	if ( phase >= 1.0 ) phase -= 1.0;
+	phase += (1.0/(sampleRate/(frequency)));
+	return(result);  
+}
+double Oscillator::NoiseWave(double frequency)
+{
+    double result=0;
+	float r = rand()/(float)RAND_MAX;
+	result =r*2-1;
+	return(result);   
+}
+
+double Oscillator::ImpulseWave(double frequency)
+{
+    if ( phase >= 1.0 ) phase -= 1.0;
+    
+    double phaseInc = (1./(sampleRate/(frequency)));
+    double result = phase < phaseInc ? 1.0 : 0.0;
+    phase += phaseInc;
+    return result;  
+}
+
+double Oscillator::PhasorWave(double frequency)
+{
+	double result=phase;
+	if ( phase >= 1.0 ) phase -= 1.0;
+	phase += (1./(sampleRate/(frequency)));
+	return(result); 
+}
+double Oscillator::RectWave(double frequency)
+{
+    double result=1;
+    return result;    
+}
+
+double Oscillator::Wave(double frequency, WaveType type)
+{
+    if(type==WaveType::Sine)
+    {
+        return SineWave(frequency);
+    }
+    else if(type == WaveType::Cosine)
+    {
+        return CosineWave(frequency);
+    }
+    else if(type == WaveType::Saw)
+    {
+        return SawWave(frequency);
+    }
+    else if(type == WaveType::Triangle)
+    {
+        return TriangleWave(frequency);
+    }
+    else if(type == WaveType::Square)
+    {
+        return SquareWave(frequency);
+    }
+    else if(type == WaveType::Noise)
+    {
+        return NoiseWave(frequency);
+    }
+    else if(type == WaveType::Impulse)
+    {
+        return ImpulseWave(frequency);
+    }
+    else if(type == WaveType::Noise)
+    {
+        return NoiseWave(frequency);
+    }
+    else if(type == WaveType::Phasor)
+    {
+        return PhasorWave(frequency);
+    }
+    else if(type == WaveType::Rect)
+    {
+        return RectWave(frequency);
+    }
+
+    return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

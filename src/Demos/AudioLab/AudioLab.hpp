@@ -18,7 +18,15 @@ float CalcFrequency(float fOctave,float fNote);
 
 enum class WaveType
 {
-    Sine=0
+    Sine     =0,
+    Cosine   =1,
+    Saw      =2,
+    Triangle =3,
+    Square   =4,
+    Noise    =5,
+    Impulse  =6,
+    Phasor   =7,
+    Rect     =8,
 };
 
 struct Graph
@@ -41,6 +49,16 @@ struct Oscillator
         time=0;
     }
     double SineWave(double frequency);
+    double CosineWave(double frequency);
+    double SawWave(double frequency);
+    double TriangleWave(double frequency);
+    double SquareWave(double frequency);
+    double NoiseWave(double frequency);
+    double ImpulseWave(double frequency);
+    double PhasorWave(double frequency);
+    double RectWave(double frequency);
+
+    double Wave(double frequency, WaveType type);
     double phase=0;
     double sampleRate = 44100;
     double time=0;
