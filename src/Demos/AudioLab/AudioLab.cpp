@@ -22,23 +22,36 @@
 //  add reverb https://blog.demofox.org/2015/03/17/diy-synth-multitap-reverb/
 //  add convolution reverb https://blog.demofox.org/2015/03/23/diy-synth-convolution-reverb-1d-discrete-convolution-of-audio-samples/
 //  Implement other types of wave from maximilian :
-//      phasor
 //      phasorBetween
-//      triangle
-//      pulse
-//      impulse
-//      noise
 //      sinebuf
 //      sinebuf4
 //      sawn
-//      rect
 //  Add maximilian filters
 //      lores
 //      hires
 //      bandpass
 //      lopass
 //      hipass
-//  Add a track UI that contains multiple clips with some controls
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void LowPass::RenderGUI()
+{
+    ImGui::Checkbox("High Pass Filter", &enabled);
+    float f_cutoff = (float)cutoff;
+    ImGui::SliderFloat("Cutoff", &f_cutoff, 0, 1);
+    cutoff = (double)f_cutoff;
+}
+
+void HighPass::RenderGUI()
+{
+    ImGui::Checkbox("High Pass Filter", &enabled);
+    float f_cutoff = (float)cutoff;
+    ImGui::SliderFloat("Cutoff", &f_cutoff, 0, 1);
+    cutoff = (double)f_cutoff;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void Graph::Render(ImDrawList* draw_list)
@@ -70,11 +83,14 @@ glm::vec2 Graph::RemapCoord(glm::vec2 coord)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void Instrument::RenderGui()
 {
+
     ImGui::Begin("Instrument");
+    
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     if(ImGui::CollapsingHeader("Instrument"))
     {
         envelope.RenderGui(draw_list);
+        
         if(ImGui::TreeNode("Waves"))
         {
             bool graphParamsChanged=false;
@@ -83,7 +99,7 @@ void Instrument::RenderGui()
             if(numNotesChanged) waveParams.resize(numNotes);
 
             graphParamsChanged |= numNotesChanged;
-            
+
             ImGui::Separator();
             
             double totalAmplitude=0;
@@ -128,6 +144,21 @@ void Instrument::RenderGui()
             ImGui::TreePop();
         }
 
+        if(ImGui::TreeNode("Filters"))
+        {
+            if(ImGui::Button("Add"))
+            {
+                filters.push_back(new HighPass());
+            }
+
+            for(int i=0; i<filters.size(); i++)
+            {
+                filters[i]->RenderGUI();
+            }
+
+            ImGui::TreePop();
+        }
+
         ImGui::Checkbox("Do Frequency Decay", &doFrequencyDecay);
     }
 
@@ -146,6 +177,13 @@ double Instrument::sound(Note* note, double time)
         double frequency = doFrequencyDecay ? note->frequency * ((1.0 - envelope.frequencyDecay) + (frequencyMultiplier*envelope.frequencyDecay)) : note->frequency;
         wave += waveParams[i].amplitudeModulation * envelopeAmplitude * note->oscillators[i].Wave(frequency * waveParams[i].frequencyModulation, waveParams[i].waveType);
     }
+
+    
+    for(int i=0; i<filters.size(); i++)
+    {
+        if(filters[i]->enabled) wave = filters[i]->Apply(wave);
+    }
+    
     return wave;
 }    
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -752,6 +790,9 @@ double Clip::Sound(double time)
         playingSample++;
     }
 
+    //FILTER
+
+
     return result;
 }
 
@@ -846,6 +887,7 @@ double AudioLab::Noise(double time)
         result += soundBuffer[playingSample]; 
         playingSample++;
     }
+
 
     result *= audioPlayer.amplitude;
     result = (std::min)(1.0, (std::max)(-1.0, result));

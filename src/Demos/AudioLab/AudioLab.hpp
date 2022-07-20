@@ -29,6 +29,46 @@ enum class WaveType
     Rect     =8,
 };
 
+struct Filter
+{
+    virtual double Apply(double frequency)=0;
+    virtual void RenderGUI(){}
+
+    bool enabled=true;
+};
+
+struct LowPass : public Filter
+{
+    double Apply(double frequency)
+    {
+        double output= outputs + cutoff*(frequency-outputs);
+        outputs=output;
+        return(output);
+    }
+
+    void RenderGUI();
+
+
+    double outputs;
+    double cutoff=1;
+};
+
+struct HighPass : public Filter
+{
+    double Apply(double frequency)
+    {
+        double result=frequency-(outputs + cutoff*(frequency-outputs));
+        outputs=result;
+        return(result);
+    }
+
+    void RenderGUI();
+
+
+    double outputs;
+    double cutoff=1;
+};
+
 struct Graph
 {
     void Render(ImDrawList* draw_list);
@@ -163,6 +203,12 @@ struct Instrument
 
     Graph waveGraph;
     float scaleX=35;
+
+    
+    std::vector<Filter*> filters;
+    // bool doFilter=false;
+    // float cutoff=0.5f;
+    // double outputs;
 };
 
 struct Note
@@ -343,6 +389,7 @@ struct Clip
     bool initialized=false;
 
     Arrangement *arrangement;
+
     
 };
 
