@@ -89,7 +89,7 @@ void Instrument::RenderGui()
             {
                 ImGui::Text("Wave %d", i);
                 ImGui::PushID(i*2 + 0);
-                    graphParamsChanged |= ImGui::SliderFloat("Amplitude Modulation", &waveParams[i].amplitudeModulation, 0, 3);
+                    graphParamsChanged |= ImGui::DragFloat("Amplitude Modulation", &waveParams[i].amplitudeModulation, 0.1f, 0, 100);
                 ImGui::PopID();
                 
                 ImGui::PushID(i*2 + 1);
@@ -119,6 +119,8 @@ void Instrument::RenderGui()
 
             ImGui::TreePop();
         }
+
+        ImGui::Checkbox("Do Frequency Decay", &doFrequencyDecay);
     }
 
     ImGui::End();
@@ -147,29 +149,30 @@ void Envelope::RenderGui(ImDrawList* draw_list)
     if(ImGui::TreeNode("Enveloppe"))
     {
         float f_attack = (float)attack;
-        ImGui::DragFloat("AttacK", &f_attack, 0.01f, 0, 10000.0f);
+        ImGui::DragFloat("AttacK", &f_attack, 0.001f, 0, 10000.0f);
         attack = f_attack;
 
         float f_decay = (float)decay;
-        ImGui::DragFloat("Decay", &f_decay, 0.01f, 0, 10000.0f);
+        ImGui::DragFloat("Decay", &f_decay, 0.001f, 0, 10000.0f);
         decay = f_decay;
 
         float f_release = (float)release;
-        ImGui::DragFloat("Release", &f_release, 0.01f, 0, 10000.0f);
+        ImGui::DragFloat("Release", &f_release, 0.001f, 0, 10000.0f);
         release = f_release;
         
         float f_startAmplitude = (float)startAmplitude;
-        ImGui::DragFloat("Start Amplitude", &f_startAmplitude, 0.01f, 0, 10000.0f);
+        ImGui::DragFloat("Start Amplitude", &f_startAmplitude, 0.001f, 0, 10000.0f);
         startAmplitude = f_startAmplitude;
         
         float f_amplitude = (float)amplitude;
-        ImGui::DragFloat("Amplitude", &f_amplitude, 0.01f, 0, 10000.0f);
+        ImGui::DragFloat("Amplitude", &f_amplitude, 0.001f, 0, 10000.0f);
         amplitude = f_amplitude;
         
         float f_frequencyDecay = (float)frequencyDecay;
-        ImGui::DragFloat("Frequency Decay", &f_frequencyDecay, 0.01f, 0, 1.0f);
+        ImGui::DragFloat("Frequency Decay", &f_frequencyDecay, 0.001f, 0, 1.0f);
         frequencyDecay = f_frequencyDecay;
 
+        
 
         float totalDuration = f_attack + f_decay + 4.0f + f_release;
         float maxAmplitude = (float)(std::max)(startAmplitude, amplitude);
@@ -656,11 +659,11 @@ void Clip::FillAudioBuffer()
     playingSample=0;
 }
 
-void Clip::AddToAudioBuffer(std::vector<double> externalSoundBuffer)
+void Clip::AddToAudioBuffer(std::vector<double> *externalSoundBuffer)
 {
     double time=0;
     double deltaTime = 1.0 / player->sampleRate;
-    for(size_t i=0; i<externalSoundBuffer.size(); i++)
+    for(size_t i=0; i<externalSoundBuffer->size(); i++)
     {
         double result=0;
         // double weight = 1.0 / recordedNotes.size();
@@ -670,7 +673,7 @@ void Clip::AddToAudioBuffer(std::vector<double> externalSoundBuffer)
             result += wave;         
         }
         
-        externalSoundBuffer[i] += result;
+        (*externalSoundBuffer)[i] += result;
         time += deltaTime;
     }
 }
@@ -685,22 +688,41 @@ double AudioLab::Noise(double time)
     double weight = 1.0f / (double)notes.size();
     weight=1;
 
+    //Sound from keyboard notes
     std::vector<int> finishedIndices;
-	for(int i = (int)notes.size() - 1; i >= 0; i--)
+	for(int i = 0; i < notes.size(); i++)
     {
         double wave = notes[i].instrument->sound(&notes[i], time);
         if(notes[i].finished) finishedIndices.push_back(i); 
         result += wave;
     }
-    
     for(int i = (int)finishedIndices.size()-1; i>=0; i--)
     {
-        notes.erase(notes.begin() + finishedIndices[i]);
+        if(finishedIndices[i] < notes.size())
+        {
+            notes.erase(notes.begin() + finishedIndices[i]);
+        }
     }
+    
+	//Sound from each clip -- not playing them if the overall arrangement is playing
+	if (!playing)
+	{
+		for(int i=0; i<arrangement.clips.size(); i++)
+		{
+			result += arrangement.clips[i].Sound(time);
+		}
+	}
 
-    for(int i=0; i<arrangement.clips.size(); i++)
+    //Sound of the whole arrangement
+    if(playing)
     {
-        result += arrangement.clips[i].Sound(time);
+        if(playingSample > soundBuffer.size()-1) 
+        {
+            playing=false;
+            return 0;
+        }
+        result += soundBuffer[playingSample]; 
+        playingSample++;
     }
 
     result *= audioPlayer.amplitude;
@@ -727,9 +749,6 @@ void AudioLab::Load() {
     {
         frequencies[i] = CalcFrequency(3, (float)i);
     }
-
-
-    
 }
 
 
@@ -755,11 +774,14 @@ void AudioLab::RenderGUI() {
     if(ImGui::Button("Play"))
     {
         soundBuffer.clear();
-        // soundBuffer.resize((size_t)audioPlayer.sampleRate * (size_t)clips[i].sequencer.recordDuration);
+        soundBuffer.resize((size_t)audioPlayer.sampleRate * (size_t)arrangement.recordDuration);
         for(int i=0; i<arrangement.clips.size(); i++)
         {
-
+            arrangement.clips[i].AddToAudioBuffer(&soundBuffer);
         }
+
+        playing=true;
+        playingSample=0;
     }
     int clipPreviewHeight = 100;
     ImVec2 regionAvailable = ImGui::GetContentRegionAvail();

@@ -305,7 +305,7 @@ struct Clip
     void RenderPianoView();
     void RenderInstrumentProperties();
     void FillAudioBuffer();
-    void AddToAudioBuffer(std::vector<double> externalSoundBuffer);
+    void AddToAudioBuffer(std::vector<double> *externalSoundBuffer);
 
     void MousePress();
     void MouseRelease();
@@ -384,5 +384,9 @@ public :
     std::vector<double> soundBuffer;
 
     AudioPlayer audioPlayer;
+    
+    bool playing=false;
+    uint64_t playingSample=0;
+    
 private:
 };
