@@ -236,6 +236,7 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("GammaCorrection")) AddProcess(new GammaCorrection(true));
         if(ImGui::Button("Equalize")) AddProcess(new Equalize(true));        
         if(ImGui::Button("FFT Blur")) AddProcess(new FFTBlur(true));        
+        if(ImGui::Button("Gradient")) AddProcess(new Gradient(true));        
 
         ImGui::EndPopup();
     }
@@ -987,7 +988,7 @@ bool DifferenceOfGaussians::RenderGui()
 
 //
 //------------------------------------------------------------------------
-CannyEdgeDetector::CannyEdgeDetector(bool enabled) : ImageProcess("CannyEdgeDetector", "shaders/CannyEdgeDetector.glsl", enabled)
+CannyEdgeDetector::CannyEdgeDetector(bool enabled) : ImageProcess("CannyEdgeDetector", "shaders/GaussianBlur.glsl", enabled)
 {
     kernel.resize(maxSize * maxSize);
     glGenBuffers(1, (GLuint*)&kernelBuffer);
@@ -995,47 +996,40 @@ CannyEdgeDetector::CannyEdgeDetector(bool enabled) : ImageProcess("CannyEdgeDete
 	glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+
+
+   CreateComputeShader("shaders/cannyGradient.glsl", &gradientShader);
+   CreateComputeShader("shaders/cannyEdge.glsl", &edgeShader);
+   CreateComputeShader("shaders/cannyThreshold.glsl", &thresholdShader);
+   CreateComputeShader("shaders/cannyHysteresis.glsl", &hysteresisShader);
 }
 
 void CannyEdgeDetector::RecalculateKernel()
 {
     int halfSize = (int)std::floor(size / 2.0f);
-
-    std::vector<float> kernel1(size * size);
-    {
-        float s = 2.0f * sigma1;
-        for (int x = -halfSize; x <= halfSize; x++) {
-            for (int y = -halfSize; y <= halfSize; y++) {
-                int flatInx = (y + halfSize) * size + (x + halfSize);
-                float x2 = (float)(x*x);
-                float y2 = (float)(y*y);
-                double num = (exp(-(x2+y2) / s));
-                double denom = (PI * s);
-                kernel1[flatInx] =  (float)(num / denom);
-            }
+    double r, s = 2.0 * sigma * sigma;
+    double sum = 0.0;
+    
+    for (int x = -halfSize; x <= halfSize; x++) {
+        for (int y = -halfSize; y <= halfSize; y++) {
+            int flatInx = (y + halfSize) * size + (x + halfSize);
+            r = (float)sqrt(x * x + y * y);
+			double num = (exp(-(r * r) / s));
+			double denom = (PI * s);
+            kernel[flatInx] =  (float)(num / denom);
+            sum += kernel[flatInx];
         }
     }
 
-    std::vector<float> kernel2(size * size);
+    // normalising the Kernel
+    for (int i = 0; i < size; ++i)
     {
-       float s = 2.0f * sigma2;
-       for (int x = -halfSize; x <= halfSize; x++) {
-            for (int y = -halfSize; y <= halfSize; y++) {
-                int flatInx = (y + halfSize) * size + (x + halfSize);
-                float x2 = (float)(x*x);
-                float y2 = (float)(y*y);
-                double num = (exp(-(x2+y2) / s));
-                double denom = (PI * s);
-                kernel2[flatInx] =  (float)(num / denom);
-            }
+        for (int j = 0; j < size; ++j)
+        {
+            int flatInx = (i) * size + (j);
+            kernel[flatInx] /= (float)sum;
         }
     }
-
-    for(int i=0; i<size * size; i++)
-    {
-        kernel[i] = kernel2[i]-kernel1[i];
-    }
-
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
     glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
@@ -1057,11 +1051,107 @@ bool CannyEdgeDetector::RenderGui()
 {
     bool changed=false;
     shouldRecalculateKernel |= ImGui::SliderInt("Size", &size, 1, maxSize);
-    shouldRecalculateKernel |= ImGui::SliderFloat("Sigma", &sigma1, 0, 10);
-    sigma2 = sigma1*2;
+    shouldRecalculateKernel |= ImGui::SliderFloat("Sigma", &sigma, 1, 10);
+    
+    shouldRecalculateKernel |= ImGui::SliderFloat("Low Threshold", &threshold, 0, 0.33f);
+
+    changed |= ImGui::DragInt("Output", &outputStep, 1, 0, 4);
+
     changed |= shouldRecalculateKernel;
     return changed;
 }
+
+void CannyEdgeDetector::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    if(blurTexture.width != width || blurTexture.height != height || !blurTexture.loaded)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.srgb=true;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
+        blurTexture = GL_TextureFloat(width, height, tci);        
+        gradientTexture = GL_TextureFloat(width, height, tci);        
+        edgeTexture = GL_TextureFloat(width, height, tci);        
+        thresholdTexture = GL_TextureFloat(width, height, tci);        
+    }
+
+	//Blur
+
+	glUseProgram(shader);
+	SetUniforms();
+    glUniform1i(glGetUniformLocation(shader, "textureIn"), 0); //program must be active
+    glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+	
+    glUniform1i(glGetUniformLocation(shader, "textureOut"), 1); //program must be active
+    glBindImageTexture(1, (outputStep==0) ? textureOut : blurTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);
+	glUseProgram(0);
+
+    if(outputStep==0) return;
+	
+    //Gradient
+    glUseProgram(gradientShader);
+    glUniform1i(glGetUniformLocation(gradientShader, "textureIn"), 0); //program must be active
+    glBindImageTexture(0, blurTexture.glTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+	
+    glUniform1i(glGetUniformLocation(gradientShader, "textureOut"), 1); //program must be active
+    glBindImageTexture(1, (outputStep==1) ? textureOut : gradientTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);
+	glUseProgram(0);
+	
+    if(outputStep==1) return;
+
+    //Edge
+    glUseProgram(edgeShader);
+    glUniform1i(glGetUniformLocation(edgeShader, "textureIn"), 0); //program must be active
+    glBindImageTexture(0, gradientTexture.glTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+	
+    glUniform1i(glGetUniformLocation(edgeShader, "textureOut"), 1); //program must be active
+    glBindImageTexture(1, (outputStep==2) ? textureOut : edgeTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    
+    
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);
+	glUseProgram(0);
+
+    if(outputStep==2) return;
+
+    //Threshold
+    glUseProgram(thresholdShader);
+    glUniform1i(glGetUniformLocation(thresholdShader, "textureIn"), 0); //program must be active
+    glBindImageTexture(0, edgeTexture.glTex , 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+	
+    glUniform1i(glGetUniformLocation(thresholdShader, "textureOut"), 1); //program must be active
+    glBindImageTexture(1, (outputStep==3) ? textureOut : thresholdTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    
+    glUniform1f(glGetUniformLocation(thresholdShader, "threshold"), threshold); //program must be active
+    
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);
+	glUseProgram(0);
+
+    if(outputStep==3) return;
+
+    //Histeresis
+    glUseProgram(hysteresisShader);
+    glUniform1i(glGetUniformLocation(hysteresisShader, "textureIn"), 0); //program must be active
+    glBindImageTexture(0, thresholdTexture.glTex , 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+	
+    glUniform1i(glGetUniformLocation(hysteresisShader, "textureOut"), 1); //program must be active
+    glBindImageTexture(1, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);
+	glUseProgram(0);
+
+}
+
+
 //
 
 //

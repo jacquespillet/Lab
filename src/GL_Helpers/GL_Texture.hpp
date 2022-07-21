@@ -28,9 +28,9 @@ public:
         if(createInfo.flip) stbi_set_flip_vertically_on_load(true);  
         // data = stbi_loadf(filename.c_str(), &width, &height, &nChannels, 0);
         
-        uint8_t* charData = stbi_load(filename.c_str(), &width, &height, &nChannels, 0);
-        data = (float*)malloc(width * height * nChannels * sizeof(float));
-        for(int i=0; i<width * height * nChannels; i++)
+        uint8_t* charData = stbi_load(filename.c_str(), &width, &height, &nChannels, 4);
+        data = (float*)malloc(width * height * 4 * sizeof(float));
+        for(int i=0; i<width * height * 4; i++)
         {
             data[i] = (float)charData[i] / 255.0f;
         }

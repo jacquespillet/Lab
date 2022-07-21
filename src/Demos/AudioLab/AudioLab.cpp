@@ -21,11 +21,13 @@
 //  add delay https://blog.demofox.org/2015/03/17/diy-synth-delay-effect-echo/
 //  add reverb https://blog.demofox.org/2015/03/17/diy-synth-multitap-reverb/
 //  add convolution reverb https://blog.demofox.org/2015/03/23/diy-synth-convolution-reverb-1d-discrete-convolution-of-audio-samples/
+
+//  
+//  https://www.musicdsp.org/en/latest/Synthesis/272-randja-compressor.html
+
+
 //  Implement other types of wave from maximilian :
 //      phasorBetween
-//      sinebuf
-//      sinebuf4
-//      sawn
 //  Add maximilian filters
 //      lores
 //      hires

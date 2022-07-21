@@ -227,14 +227,26 @@ struct CannyEdgeDetector : public ImageProcess
     CannyEdgeDetector(bool enabled=true);
     void SetUniforms() override;
     bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
 
     void RecalculateKernel();
-    int size=9;
-    float sigma1=1.0f;
-    float sigma2=3.0f;
+    int size=3;
+    float sigma=1;
     int maxSize = 257;
+    float threshold=0.4f;
     std::vector<float> kernel;
     GLuint kernelBuffer;
+
+    GLint gradientShader;
+    GLint edgeShader;
+    GLint thresholdShader;
+    GLint hysteresisShader;
+    GL_TextureFloat blurTexture;
+    GL_TextureFloat gradientTexture;
+    GL_TextureFloat edgeTexture;
+    GL_TextureFloat thresholdTexture;
+    
+    int outputStep=4;
 
     bool shouldRecalculateKernel=true;
 };
