@@ -11,6 +11,8 @@
 
 struct ImageProcessStack;
 
+void Line(glm::ivec2 x0, glm::ivec2 x2, std::vector<glm::vec4> &image, int width);
+
 struct ImageProcess
 {
     ImageProcess(std::string name, std::string shaderFileName, bool enabled);
@@ -291,11 +293,8 @@ struct EdgeLinking : public ImageProcess
 
     int windowSize=4;
 
-    void Line(glm::ivec2 x0, glm::ivec2 x2);
-
     bool doProcess=true;
 
-    int imageWidth;
     std::vector<glm::vec4> gradientData;
     std::vector<glm::vec4> edgeData;
     std::vector<glm::vec4> linkedEdgeData;

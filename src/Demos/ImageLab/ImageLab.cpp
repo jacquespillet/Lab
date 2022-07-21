@@ -15,6 +15,41 @@
 
 #define MODE 2
 
+
+void Line(glm::ivec2 x0, glm::ivec2 x1, std::vector<glm::vec4> &image, int width)
+{
+    bool steep = false; 
+    if (std::abs(x0.x-x1.x)<std::abs(x0.y-x1.y)) { 
+        std::swap(x0.x, x0.y); 
+        std::swap(x1.x, x1.y); 
+        steep = true; 
+    } 
+    if (x0.x>x1.x) { 
+        std::swap(x0.x, x1.x); 
+        std::swap(x0.y, x1.y); 
+    } 
+    int dx = x1.x-x0.x; 
+    int dy = x1.y-x0.y; 
+    float derror = std::abs(dy/float(dx)); 
+    float error = 0; 
+    int y = x0.y; 
+    for (int x=x0.x; x<=x1.x; x++) { 
+        if (steep) { 
+            
+            // image.set(y, x, color); 
+            image[x * width + y] = glm::vec4(1);
+        } else { 
+            // image.set(x, y, color); 
+            image[y * width + x] = glm::vec4(1);
+        } 
+        error += derror; 
+        if (error>.5) { 
+            y += (x1.y>x0.y?1:-1); 
+            error -= 1.; 
+        } 
+    } 
+}
+
 ImageProcess::ImageProcess(std::string name, std::string shaderFileName, bool enabled) :name(name), shaderFileName(shaderFileName), enabled(enabled)
 {
     if(shaderFileName != "") CreateComputeShader(shaderFileName, &shader);
@@ -1290,44 +1325,9 @@ bool EdgeLinking::RenderGui()
     return changed;
 }
 
-void EdgeLinking::Line(glm::ivec2 x0, glm::ivec2 x1)
-{
-    bool steep = false; 
-    if (std::abs(x0.x-x1.x)<std::abs(x0.y-x1.y)) { 
-        std::swap(x0.x, x0.y); 
-        std::swap(x1.x, x1.y); 
-        steep = true; 
-    } 
-    if (x0.x>x1.x) { 
-        std::swap(x0.x, x1.x); 
-        std::swap(x0.y, x1.y); 
-    } 
-    int dx = x1.x-x0.x; 
-    int dy = x1.y-x0.y; 
-    float derror = std::abs(dy/float(dx)); 
-    float error = 0; 
-    int y = x0.y; 
-    for (int x=x0.x; x<=x1.x; x++) { 
-        if (steep) { 
-            
-            // image.set(y, x, color); 
-            linkedEdgeData[x * imageWidth + y] = glm::vec4(1);
-        } else { 
-            // image.set(x, y, color); 
-            linkedEdgeData[y * imageWidth + x] = glm::vec4(1);
-        } 
-        error += derror; 
-        if (error>.5) { 
-            y += (x1.y>x0.y?1:-1); 
-            error -= 1.; 
-        } 
-    } 
-}
 
 void EdgeLinking::Process(GLuint textureIn, GLuint textureOut, int width, int height)
 {
-    this->imageWidth = width;
-
     //Only recompute canny when its params changed.
     // if(cannyChanged) 
     cannyEdgeDetector->Process(textureIn, textureOut, width, height);
@@ -1393,12 +1393,10 @@ void EdgeLinking::Process(GLuint textureIn, GLuint textureOut, int width, int he
                             float windowMagnitude = gradientData[coordInx].x;
                             float windowAngle = gradientData[coordInx].y;
                             
-                            // glm::vec2 magnitudeVec(windowMagnitude, pixelMagnitude);
-                            // glm::vec2 angleVec(pixelAngle, windowAngle);
                             if(std::abs(windowMagnitude - pixelMagnitude) < magnitudeThreshold && std::abs(windowAngle - pixelAngle) < angleThreshold)
                             {
                                 //Add an edge between pixelCoord and windowCoord
-                                Line(pixelCoord, coord);
+                                Line(pixelCoord, coord, linkedEdgeData, width);
                             }
                         }
                     }
