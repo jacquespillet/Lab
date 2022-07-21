@@ -278,6 +278,32 @@ struct GammaCorrection : public ImageProcess
     float gamma=2.2f;
 };
 
+struct EdgeLinking : public ImageProcess
+{
+    EdgeLinking(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+
+    CannyEdgeDetector *cannyEdgeDetector;
+
+    bool cannyChanged=true;
+
+    int windowSize=4;
+
+    void Line(glm::ivec2 x0, glm::ivec2 x2);
+
+    bool doProcess=true;
+
+    int imageWidth;
+    std::vector<glm::vec4> gradientData;
+    std::vector<glm::vec4> edgeData;
+    std::vector<glm::vec4> linkedEdgeData;
+
+    float magnitudeThreshold= 0.4f;
+    float angleThreshold = 0.4f;
+};
+
 struct Gradient : public ImageProcess
 {
     Gradient(bool enabled=true);

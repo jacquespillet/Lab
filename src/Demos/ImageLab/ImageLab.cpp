@@ -237,6 +237,10 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("Equalize")) AddProcess(new Equalize(true));        
         if(ImGui::Button("FFT Blur")) AddProcess(new FFTBlur(true));        
         if(ImGui::Button("Gradient")) AddProcess(new Gradient(true));        
+        if(ImGui::Button("LaplacianOfGaussian")) AddProcess(new LaplacianOfGaussian(true));        
+        if(ImGui::Button("DifferenceOfGaussians")) AddProcess(new DifferenceOfGaussians(true));        
+        if(ImGui::Button("CannyEdgeDetector")) AddProcess(new CannyEdgeDetector(true));        
+        if(ImGui::Button("EdgeLinking")) AddProcess(new EdgeLinking(true));        
 
         ImGui::EndPopup();
     }
@@ -1255,6 +1259,165 @@ bool GammaCorrection::RenderGui()
 }
 //
 
+//
+//------------------------------------------------------------------------
+EdgeLinking::EdgeLinking(bool enabled) : ImageProcess("EdgeLinking", "", enabled)
+{
+    cannyEdgeDetector = new CannyEdgeDetector(true);
+}
+
+void EdgeLinking::SetUniforms()
+{
+}
+
+bool EdgeLinking::RenderGui()
+{
+    bool changed=false;
+    
+    ImGui::Text("Canny Edge Detector");
+    cannyChanged = cannyEdgeDetector->RenderGui();
+
+    changed |= cannyChanged;
+
+    ImGui::Separator();
+    ImGui::Text("Edge Linking");
+
+    changed |= ImGui::Checkbox("Apply Process", &doProcess);
+    changed |= ImGui::SliderInt("Window Size", &windowSize, 1, 32);
+    changed |= ImGui::DragFloat("Magnitude Threshold", &magnitudeThreshold, 0.001f, 0, 100);
+    changed |= ImGui::DragFloat("Angle Threshold", &angleThreshold, 0.001f, 0, 100);
+    
+    return changed;
+}
+
+void EdgeLinking::Line(glm::ivec2 x0, glm::ivec2 x1)
+{
+    bool steep = false; 
+    if (std::abs(x0.x-x1.x)<std::abs(x0.y-x1.y)) { 
+        std::swap(x0.x, x0.y); 
+        std::swap(x1.x, x1.y); 
+        steep = true; 
+    } 
+    if (x0.x>x1.x) { 
+        std::swap(x0.x, x1.x); 
+        std::swap(x0.y, x1.y); 
+    } 
+    int dx = x1.x-x0.x; 
+    int dy = x1.y-x0.y; 
+    float derror = std::abs(dy/float(dx)); 
+    float error = 0; 
+    int y = x0.y; 
+    for (int x=x0.x; x<=x1.x; x++) { 
+        if (steep) { 
+            
+            // image.set(y, x, color); 
+            linkedEdgeData[x * imageWidth + y] = glm::vec4(1);
+        } else { 
+            // image.set(x, y, color); 
+            linkedEdgeData[y * imageWidth + x] = glm::vec4(1);
+        } 
+        error += derror; 
+        if (error>.5) { 
+            y += (x1.y>x0.y?1:-1); 
+            error -= 1.; 
+        } 
+    } 
+}
+
+void EdgeLinking::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    this->imageWidth = width;
+
+    //Only recompute canny when its params changed.
+    // if(cannyChanged) 
+    cannyEdgeDetector->Process(textureIn, textureOut, width, height);
+
+    //Read back gradient
+    gradientData.resize(width * height, glm::vec4(0));
+    glBindTexture(GL_TEXTURE_2D, cannyEdgeDetector->gradientTexture.glTex);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    gradientData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    //Read back edges
+    edgeData.resize(width * height, glm::vec4(0));
+    glBindTexture(GL_TEXTURE_2D, textureOut);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    edgeData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+
+    int halfWindowSize = windowSize/2;
+
+    linkedEdgeData.resize(width * height);
+    std::fill(linkedEdgeData.begin(), linkedEdgeData.end(), glm::vec4(0));
+
+    glm::ivec2 pixelCoord;
+    for(pixelCoord.y=0; pixelCoord.y<height; pixelCoord.y++)
+    {
+        for(pixelCoord.x=0; pixelCoord.x<width; pixelCoord.x++)
+        {
+
+            int inx = pixelCoord.y * width + pixelCoord.x;
+            float pixelEdge = edgeData[inx].x;
+            
+            //Copy the edgeData to the output in all cases
+            linkedEdgeData[inx] = edgeData[inx];
+
+            if(!doProcess) continue;
+            
+            if(pixelEdge>0)
+            {
+                float pixelMagnitude = gradientData[inx].x;
+                float pixelAngle = gradientData[inx].y;
+
+                glm::ivec2 windowCoord;
+                for(windowCoord.y=-halfWindowSize; windowCoord.y < halfWindowSize; windowCoord.y++)
+                {
+                    for(windowCoord.x=-halfWindowSize; windowCoord.x < halfWindowSize; windowCoord.x++)
+                    {
+                        glm::ivec2 coord = pixelCoord + windowCoord;
+                        if(coord.x < 0 || coord.y < 0 || coord.x >=width || coord.y >=height)continue;
+
+                        int coordInx = coord.y * width + coord.x;
+                        float windowEdge = edgeData[coordInx].x;
+                        if(windowEdge>0) //If we find another edge in the window
+                        {
+
+                            float windowMagnitude = gradientData[coordInx].x;
+                            float windowAngle = gradientData[coordInx].y;
+                            
+                            // glm::vec2 magnitudeVec(windowMagnitude, pixelMagnitude);
+                            // glm::vec2 angleVec(pixelAngle, windowAngle);
+                            if(std::abs(windowMagnitude - pixelMagnitude) < magnitudeThreshold && std::abs(windowAngle - pixelAngle) < angleThreshold)
+                            {
+                                //Add an edge between pixelCoord and windowCoord
+                                Line(pixelCoord, coord);
+                            }
+                        }
+                    }
+                }
+            }
+
+        }    
+    }
+
+
+
+
+    glBindTexture(GL_TEXTURE_2D, textureOut);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, linkedEdgeData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+//
+//
+
 
 //
 //------------------------------------------------------------------------
@@ -1525,7 +1688,7 @@ void ImageLab::Load() {
 
 
     imageProcessStack.Resize(texture.width, texture.height);
-    imageProcessStack.AddProcess(new CannyEdgeDetector(true));
+    imageProcessStack.AddProcess(new EdgeLinking(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
     // imageProcessStack.AddProcess(new Equalize(true));
