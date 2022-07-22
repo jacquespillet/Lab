@@ -330,6 +330,20 @@ struct HoughTransform : public ImageProcess
     bool shouldProcess=true;
 };
 
+struct PolygonFitting : public ImageProcess
+{
+    PolygonFitting(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+
+    int GetStartIndex(glm::ivec2 b, glm::ivec2 c);
+
+    float threshold=1;
+
+    std::vector<glm::vec4> inputData;
+};
+
 struct Gradient : public ImageProcess
 {
     Gradient(bool enabled=true);

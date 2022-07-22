@@ -12,9 +12,19 @@
 
 #include <complex>
 #include <fftw3.h>
+#include <stack>
 
 #define MODE 2
 
+float DistancePointLine(glm::vec2 v, glm::vec2 w, glm::vec2 p) {
+  // Return minimum distance between line segment vw and point p
+  const float l2 = glm::length2(v-w);  // i.e. |w-v|^2 -  avoid a sqrt
+  if (l2 == 0.0) return glm::distance(p, v);   // v == w case
+  
+  const float t = std::max(0.0f, std::min(1.0f, glm::dot(p - v, w - v) / l2));
+  const glm::vec2 projection = v + t * (w - v); 
+  return glm::distance(p, projection);
+}
 
 void DrawLine(glm::ivec2 x0, glm::ivec2 x1, std::vector<glm::vec4> &image, int width, int height, glm::vec4 color)
 {
@@ -84,8 +94,8 @@ void ImageProcessStack::Resize(int width, int height)
     if(tex1.loaded) tex1.Unload();
     
     TextureCreateInfo tci = {};
-    tci.minFilter = GL_LINEAR;
-    tci.magFilter = GL_LINEAR;
+    tci.minFilter = GL_NEAREST;
+    tci.magFilter = GL_NEAREST;
     tex0 = GL_TextureFloat(width, height, tci);
     tex1 = GL_TextureFloat(width, height, tci);
 }
@@ -116,8 +126,8 @@ ImageProcessStack::ImageProcessStack()
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
 
     TextureCreateInfo tci = {};
-    tci.minFilter = GL_LINEAR;
-    tci.magFilter = GL_LINEAR;
+    tci.minFilter = GL_NEAREST;
+    tci.magFilter = GL_NEAREST;
     histogramTexture = GL_TextureFloat(256, 256, tci);
 
     CreateComputeShader("shaders/Histogram.glsl", &histogramShader);
@@ -1420,7 +1430,7 @@ HoughTransform::HoughTransform(bool enabled) : ImageProcess("HoughTransform", ""
     cannyEdgeDetector = new CannyEdgeDetector(true);
     cannyEdgeDetector->size=3;
     cannyEdgeDetector->sigma=1;
-    cannyEdgeDetector->threshold=0.038;
+    cannyEdgeDetector->threshold=0.038f;
 }
 
 void HoughTransform::SetUniforms()
@@ -1634,6 +1644,244 @@ void HoughTransform::Process(GLuint textureIn, GLuint textureOut, int width, int
     }
 
     shouldProcess=false;
+}
+//
+//
+
+//
+//------------------------------------------------------------------------
+PolygonFitting::PolygonFitting(bool enabled) : ImageProcess("PolygonFitting", "", enabled)
+{
+}
+
+void PolygonFitting::SetUniforms()
+{
+}
+
+bool PolygonFitting::RenderGui()
+{
+    bool changed=false;
+    return changed;
+}
+
+int PolygonFitting::GetStartIndex(glm::ivec2 b, glm::ivec2 c)
+{
+    glm::ivec2 diff = c - b;
+    if(diff == glm::ivec2(-1, 0)) return 0; //0:Left 
+    if(diff == glm::ivec2(-1,-1)) return 1; //1:top left
+    if(diff == glm::ivec2( 0,-1)) return 2; //2:top
+    if(diff == glm::ivec2( 1,-1)) return 3; //3:top right
+    if(diff == glm::ivec2( 1, 0)) return 4; //4:right
+    if(diff == glm::ivec2( 1, 1)) return 5; //5:bottom right
+    if(diff == glm::ivec2( 0, 1)) return 6; //6:bottom
+    if(diff == glm::ivec2(-1, 1)) return 7; //7:bottom left
+    return 0;
+}
+
+void PolygonFitting::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    //Read back color data
+    inputData.resize(width * height, glm::vec4(0));
+    glBindTexture(GL_TEXTURE_2D, textureIn);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    std::vector<glm::ivec2> directions = 
+    {
+        glm::ivec2(-1, 0),//0:Left 
+        glm::ivec2(-1,-1),//1:top left
+        glm::ivec2( 0,-1),//2:top
+        glm::ivec2( 1,-1),//3:top right
+        glm::ivec2( 1, 0),//4:right
+        glm::ivec2( 1, 1),//5:bottom right
+        glm::ivec2( 0, 1),//6:bottom
+        glm::ivec2(-1, 1),//7:bottom left
+    };
+
+    struct point
+    {
+        glm::ivec2 b;
+        glm::ivec2 c;
+    };
+    std::vector<point> points;
+
+    //Find the first point
+	bool shouldBreak = false;
+    for(int y=0; y<height; y++)
+    {
+        for(int x=0; x<width; x++)
+        {
+            if(inputData[y * width + x].x != 0)
+            {
+                points.push_back(
+                    {
+                        glm::ivec2(x, y),
+                        glm::ivec2(x-1, y)
+                    }
+                );
+				shouldBreak = true;
+				break;
+            }
+        }
+		if (shouldBreak)break;
+    }
+    
+    //Find the ordered list of points
+    point *currentPoint = &points[points.size()-1];
+    point firstPoint = *currentPoint;
+    do {
+        glm::ivec2 prevCoord;
+        int startInx = GetStartIndex(currentPoint->b, currentPoint->c);
+        
+        for(int i=startInx; i<startInx + directions.size(); i++)
+        {
+			int dirInx = i % directions.size();
+
+            glm::ivec2 checkCoord = currentPoint->b + directions[dirInx];
+            float checkValue = inputData[checkCoord.y * width + checkCoord.x].x;
+            if(checkValue>0)
+            {
+                point newPoint = 
+                {
+                    checkCoord,
+                    prevCoord,
+                };
+                points.push_back(newPoint);
+				break;
+            }
+            prevCoord = checkCoord;
+        }
+
+        currentPoint = &points[points.size()-1];
+    }
+    while(currentPoint->b != firstPoint.b && currentPoint->c != firstPoint.c);
+
+    //Remove duplicate point
+    points.erase(points.begin() + points.size()-1);
+
+    //Fit a polygon
+    int leftMost = 10000000;
+    int rightMost = 0;
+    int leftMostInx=0;
+    int rightMostInx=0;
+    for(int i=0; i<points.size(); i++)
+    {
+        if(points[i].b.x < leftMost)
+        {
+            leftMost = points[i].b.x;
+            leftMostInx=i;
+        }
+        
+        if(points[i].b.x > rightMost)
+        {
+            rightMost = points[i].b.x;
+            rightMostInx=i;
+        }
+    }
+
+    int A = leftMostInx;
+    int B = rightMostInx;
+    
+    std::stack<int> finalPoints;
+    std::stack<int> processPoints;
+
+    finalPoints.push(B);
+    processPoints.push(B);
+    processPoints.push(A);
+
+    int threshold = 1;
+
+    while(true)
+    {
+        // glm::ivec2 line = points[finalPoints.top()].b - points[processPoints.top()].b;
+        glm::ivec2 line0 = points[finalPoints.top()].b;
+        glm::ivec2 line1 = points[processPoints.top()].b;
+        if(finalPoints.top() < processPoints.top())
+        {
+            float maxDistance=0;
+            int maxInx=0;
+            for(int i=finalPoints.top(); i<processPoints.top(); i++)
+            {
+                float distance = DistancePointLine(line0, line1, points[i].b);
+                if(distance > maxDistance)
+                {
+                    maxDistance=distance;
+                    maxInx=i;
+                }
+            }
+            if(maxDistance > threshold)
+            {
+                processPoints.push(maxInx);
+            }
+            else
+            {
+                int lastProcess = processPoints.top();
+                finalPoints.push(lastProcess);
+                processPoints.pop();
+            }
+        }
+        else
+        {
+            float maxDistance=0;
+            int maxInx=0;
+            for(int i=finalPoints.top(); i<points.size(); i++)
+            {
+                float distance = DistancePointLine(line0, line1, points[i].b);
+                if(distance > maxDistance)
+                {
+                    maxDistance=distance;
+                    maxInx=i;
+                }
+            }
+            for(int i=0; i<processPoints.top(); i++)
+            {
+                float distance = DistancePointLine(line0, line1, points[i].b);
+                if(distance > maxDistance)
+                {
+                    maxDistance=distance;
+                    maxInx=i;
+                }
+            }
+            if(maxDistance > threshold)
+            {
+                processPoints.push(maxInx);
+            }
+            else
+            {
+                int lastProcess = processPoints.top();
+                finalPoints.push(lastProcess);
+                processPoints.pop();
+            }
+                        
+        }
+        if(processPoints.size() == 0) break;
+    }
+
+    float inverseNumLines = 1.0f / (float)finalPoints.size();
+    float color = 0;
+    while(finalPoints.size()>1)
+    {
+        int inx0 = finalPoints.top();
+        finalPoints.pop();
+        int inx1 = finalPoints.top();
+        
+        glm::ivec2 a = points[inx0].b;
+        glm::ivec2 b = points[inx1].b;
+        DrawLine(a, b, inputData, width, height, glm::vec4(color,1,0,1));
+
+        color += inverseNumLines;
+    }
+
+    //Calculate the distance with each points between A and B 
+
+    
+    glBindTexture(GL_TEXTURE_2D, textureOut);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 //
 //
@@ -1899,17 +2147,18 @@ void ImageLab::Load() {
     TextureCreateInfo tci = {};
     tci.generateMipmaps =false;
     tci.srgb=true;
-    tci.minFilter = GL_LINEAR;
-    tci.magFilter = GL_LINEAR;
+    tci.minFilter = GL_NEAREST;
+    tci.magFilter = GL_NEAREST;
     // texture = GL_TextureFloat("resources/Tom.png", tci);
-    texture = GL_TextureFloat("resources/Sudoku.jpeg", tci);
+    // texture = GL_TextureFloat("resources/Sudoku.jpeg", tci);
+    texture = GL_TextureFloat("resources/shape.png", tci);
     tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
     Quad = GetQuad();
     
 
 
     imageProcessStack.Resize(texture.width, texture.height);
-    imageProcessStack.AddProcess(new HoughTransform(true));
+    imageProcessStack.AddProcess(new PolygonFitting(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
     // imageProcessStack.AddProcess(new Equalize(true));

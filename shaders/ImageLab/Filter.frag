@@ -8,8 +8,9 @@ uniform sampler2D textureImage;
 // uniform vec2
 void main()
 {
-    vec3 result;
-    result = texture(textureImage, fragUv).rgb;
-    result = pow(result, vec3(1/2.2));
+    vec2 uv = fragUv;
+    uv.y = 1 -uv.y;
+    
+    vec3 result = texture(textureImage, uv).rgb;
     fragColor = vec4(result, 1.0f) ;
 }

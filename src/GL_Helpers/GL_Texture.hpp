@@ -4,6 +4,7 @@
 
 #include <stb_image.h>
 #include <iostream>
+#include <glm/vec4.hpp>
 
 struct TextureCreateInfo {
     GLint wrapS = GL_MIRRORED_REPEAT;
@@ -12,7 +13,7 @@ struct TextureCreateInfo {
     GLint magFilter = GL_LINEAR;
     bool generateMipmaps=true;
     bool srgb=false;
-    bool flip=true;
+    bool flip=false;
 };
 
 class GL_TextureFloat {
@@ -29,11 +30,27 @@ public:
         // data = stbi_loadf(filename.c_str(), &width, &height, &nChannels, 0);
         
         uint8_t* charData = stbi_load(filename.c_str(), &width, &height, &nChannels, 4);
-        data = (float*)malloc(width * height * 4 * sizeof(float));
-        for(int i=0; i<width * height * 4; i++)
+        data = (glm::vec4*)malloc(width * height * sizeof(glm::vec4));
+        for(int i=0; i<width * height; i++)
         {
-            data[i] = (float)charData[i] / 255.0f;
+            data[i].r = (float)charData[i * 4 + 0] / 255.0f;
+            data[i].g = (float)charData[i * 4 + 1] / 255.0f;
+            data[i].b = (float)charData[i * 4 + 2] / 255.0f;
+            data[i].a = (float)charData[i * 4 + 3] / 255.0f;
         }
+
+#if 0
+        for(int y=0; y<height; y++)
+        {
+            for(int x=0; x<height; x++)
+            {
+                int inx = y * width + x;
+                std::cout << data[inx].x << " ";
+            }
+            std::cout << std::endl;
+        }
+#endif
+
         stbi_image_free(charData);
 
         if (data)
@@ -77,7 +94,7 @@ public:
         if(data != nullptr) free(data);
     }
 
-    float *Data()
+    glm::vec4 *Data()
     {
         return data;
     }
@@ -86,7 +103,7 @@ public:
     bool loaded=false;
     int width, height, nChannels;
     std::string filename;
-    float *data= nullptr;
+    glm::vec4 *data= nullptr;
 
 };
 
