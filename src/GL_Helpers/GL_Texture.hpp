@@ -67,13 +67,14 @@ public:
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, createInfo.magFilter);
     
         glBindTexture(GL_TEXTURE_2D, 0);
-        loaded = true;        
+        loaded = true;  
+        data = nullptr;
     }
 
     void Unload()
     {
         glDeleteTextures(1, &glTex);
-        stbi_image_free(data);
+        if(data != nullptr) free(data);
     }
 
     float *Data()
@@ -85,7 +86,7 @@ public:
     bool loaded=false;
     int width, height, nChannels;
     std::string filename;
-    float *data;
+    float *data= nullptr;
 
 };
 

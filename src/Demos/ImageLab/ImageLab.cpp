@@ -16,7 +16,7 @@
 #define MODE 2
 
 
-void Line(glm::ivec2 x0, glm::ivec2 x1, std::vector<glm::vec4> &image, int width)
+void DrawLine(glm::ivec2 x0, glm::ivec2 x1, std::vector<glm::vec4> &image, int width, int height, glm::vec4 color)
 {
     bool steep = false; 
     if (std::abs(x0.x-x1.x)<std::abs(x0.y-x1.y)) { 
@@ -35,12 +35,9 @@ void Line(glm::ivec2 x0, glm::ivec2 x1, std::vector<glm::vec4> &image, int width
     int y = x0.y; 
     for (int x=x0.x; x<=x1.x; x++) { 
         if (steep) { 
-            
-            // image.set(y, x, color); 
-            image[x * width + y] = glm::vec4(1);
+            if(x < width && x>=0 && y < height && y >=0) image[x * width + y] = color;
         } else { 
-            // image.set(x, y, color); 
-            image[y * width + x] = glm::vec4(1);
+            if(y < width && y>=0 && x < height && x >=0)  image[y * width + x] = color;
         } 
         error += derror; 
         if (error>.5) { 
@@ -276,6 +273,7 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("DifferenceOfGaussians")) AddProcess(new DifferenceOfGaussians(true));        
         if(ImGui::Button("CannyEdgeDetector")) AddProcess(new CannyEdgeDetector(true));        
         if(ImGui::Button("EdgeLinking")) AddProcess(new EdgeLinking(true));        
+        if(ImGui::Button("HoughTransform")) AddProcess(new HoughTransform(true));        
 
         ImGui::EndPopup();
     }
@@ -1328,8 +1326,7 @@ bool EdgeLinking::RenderGui()
 
 void EdgeLinking::Process(GLuint textureIn, GLuint textureOut, int width, int height)
 {
-    //Only recompute canny when its params changed.
-    // if(cannyChanged) 
+    //Only recompute canny when its params changed. //Output it into textureOut, act as a tmp texture that we'll write again after
     cannyEdgeDetector->Process(textureIn, textureOut, width, height);
 
     //Read back gradient
@@ -1396,7 +1393,7 @@ void EdgeLinking::Process(GLuint textureIn, GLuint textureOut, int width, int he
                             if(std::abs(windowMagnitude - pixelMagnitude) < magnitudeThreshold && std::abs(windowAngle - pixelAngle) < angleThreshold)
                             {
                                 //Add an edge between pixelCoord and windowCoord
-                                Line(pixelCoord, coord, linkedEdgeData, width);
+                                DrawLine(pixelCoord, coord, linkedEdgeData, width, height, glm::vec4(1));
                             }
                         }
                     }
@@ -1412,6 +1409,231 @@ void EdgeLinking::Process(GLuint textureIn, GLuint textureOut, int width, int he
     glBindTexture(GL_TEXTURE_2D, textureOut);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, linkedEdgeData.data());
     glBindTexture(GL_TEXTURE_2D, 0);
+}
+//
+//
+
+//
+//------------------------------------------------------------------------
+HoughTransform::HoughTransform(bool enabled) : ImageProcess("HoughTransform", "", enabled)
+{
+    cannyEdgeDetector = new CannyEdgeDetector(true);
+    cannyEdgeDetector->size=3;
+    cannyEdgeDetector->sigma=1;
+    cannyEdgeDetector->threshold=0.038;
+}
+
+void HoughTransform::SetUniforms()
+{
+}
+
+bool HoughTransform::RenderGui()
+{
+    bool changed=false;
+    
+    ImGui::Text("Canny Edge Detector");
+    cannyChanged = cannyEdgeDetector->RenderGui();
+
+    changed |= cannyChanged;
+
+    ImGui::Separator();
+    ImGui::Text("Edge Linking");
+
+    changed |= ImGui::DragInt("Hough Space Width", &houghSpaceSize, 1, 1, 8192);
+
+    changed |= ImGui::DragInt("Hood Size", &hoodSize, 1, 1, houghSpaceSize);
+    
+    changed |= ImGui::Checkbox("Add To Image", &addToImage);
+    changed |= ImGui::Checkbox("View edges", &viewEdges);
+
+    ImGui::Image((ImTextureID)houghTexture.glTex, ImVec2(256, 128));
+
+    ImGui::DragFloat("Threshold", &threshold, 1, 0, 10000);
+
+    if(ImGui::Button("Process")) shouldProcess=true;
+    changed |= shouldProcess;
+    return changed;
+}
+
+
+void HoughTransform::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    if(shouldProcess)
+    {
+        //Recreate textures if size changed
+        if(houghTexture.width != houghSpaceSize || houghTexture.height != houghSpaceSize || !houghTexture.loaded)
+        {
+            TextureCreateInfo tci = {};
+            tci.generateMipmaps =false;
+            tci.srgb=true;
+            tci.minFilter = GL_LINEAR;
+            tci.magFilter = GL_LINEAR;     
+            if(houghTexture.loaded) houghTexture.Unload();   
+            houghTexture = GL_TextureFloat(houghSpaceSize, houghSpaceSize, tci);        
+        }
+        
+        //Only recompute canny when its params changed.
+        cannyEdgeDetector->Process(textureIn, textureOut, width, height);
+
+        //Reinitialize the hough space map
+        houghSpace.resize(houghSpaceSize * houghSpaceSize);
+        std::fill(houghSpace.begin(), houghSpace.end(), glm::vec4(0,0,0,1));
+
+        //Read back edges
+        edgeData.resize(width * height, glm::vec4(0));
+        glBindTexture(GL_TEXTURE_2D, textureOut);
+        glGetTexImage (GL_TEXTURE_2D,
+                        0,
+                        GL_RGBA, // GL will convert to this format
+                        GL_FLOAT,   // Using this data type per-pixel
+                        edgeData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        //Read back color data
+        inputData.resize(width * height, glm::vec4(0));
+        glBindTexture(GL_TEXTURE_2D, textureIn);
+        glGetTexImage (GL_TEXTURE_2D,
+                        0,
+                        GL_RGBA, // GL will convert to this format
+                        GL_FLOAT,   // Using this data type per-pixel
+                        inputData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        //Initialize output
+        linesData.resize(width * height);
+        std::fill(linesData.begin(), linesData.end(), glm::vec4(0));
+
+        //Build the hough space map
+        int diagLength = (int)std::sqrt(width*width + height*height);
+        int doubleDiagLength = diagLength*2;
+        glm::ivec2 pixelCoord;
+        for(pixelCoord.y=0; pixelCoord.y<height; pixelCoord.y++)
+        {
+            for(pixelCoord.x=0; pixelCoord.x<width; pixelCoord.x++)
+            {
+                int inx = pixelCoord.y * width + pixelCoord.x;
+                float pixelEdge = edgeData[inx].x;
+                glm::vec4 pixelColor = inputData[inx];
+                
+                if(addToImage) 
+                {
+                    if(viewEdges) linesData[inx] = edgeData[inx];
+                    else linesData[inx] = pixelColor;
+                }
+
+                //If we're on an edge
+                if(pixelEdge>0)
+                {
+                    for(int t=0; t<houghSpaceSize; t++) //For all angles
+                    {
+                        glm::vec2 cartesianCoord = glm::vec2(pixelCoord) - glm::vec2(width, height) * 0.5f;
+                        float theta = (((float)t / (float)houghSpaceSize) * PI);
+                        float rho = (float)cartesianCoord.x * cos(theta) + (float)cartesianCoord.y * sin(theta) + diagLength;
+                        float houghSpaceRho = (rho / (float)(doubleDiagLength)) * houghSpaceSize;
+                        int r = (int)std::floor(houghSpaceRho);
+                        //Increment
+                        houghSpace[r * houghSpaceSize + t].x+=1;
+                    }
+                }
+            }    
+        }
+
+        //Find peaks
+
+        //Build a peak map that contains the number of votes and the corresponding line
+        int peakWidth = houghSpaceSize / hoodSize;
+        int peakHeight = houghSpaceSize / hoodSize;
+        struct Line 
+        {
+            float numVotes=0;
+            glm::ivec2 x0, x1;
+            glm::ivec2 pixel;
+        };
+        std::vector<Line> peaksMap(peakWidth*peakHeight, {0, glm::ivec2(0,0), glm::ivec2(0,0), glm::ivec2(0)});
+                
+        float maxVotes=0;
+        for(int r=0; r<houghSpaceSize; r++)
+        {
+            for(int t=0; t<houghSpaceSize; t++)
+            {
+                float numVotes=houghSpace[r * houghSpaceSize + t].x;
+                maxVotes = std::max(maxVotes, numVotes);
+                if(numVotes > threshold) //If non empty
+                {
+                    //Find in which bin this is
+                    int peakX = (int)((float)r/(float)houghSpaceSize * (float)(peakHeight-1));
+                    int peakY = (int)((float)t/(float)houghSpaceSize * (float)(peakWidth-1));
+                    int peakInx = std::min((int)peaksMap.size()-1, std::max(0, peakY * peakWidth + peakX));
+
+
+                    if(numVotes > peaksMap[peakInx].numVotes) //If the current line has more votes than the one currently in the bin, update it
+                    {
+                        //Find back angle and distance
+                        float rho = ((float)r / (float)houghSpaceSize) * doubleDiagLength - diagLength;
+                        float theta = (((float)t / (float)houghSpaceSize) * PI);
+
+                        //Find point on the line
+                        float a = cos(theta);
+                        float b = sin(theta);
+                        float x = (a * rho);
+                        float y = (b * rho);
+
+                        //Find the 2 points next to each others on the line
+                        glm::vec2 x1(
+                            x - b,
+                            y + a
+                        );
+                        glm::vec2 x2(
+                            x + b,
+                            y - a
+                        );
+                        
+                        //Normalized direction from x1 to x2
+                        glm::vec2 direction = glm::normalize(x2-x1);
+                        
+                        //line endpoints
+                        x2 = x1 + direction * 10000;
+                        x1 = x1 - direction * 10000;
+                        
+                        //Cartesian to image space
+                        glm::vec2 halfSize(width/2, height/2);
+                        x1 += halfSize;
+                        x2 += halfSize;                        
+                        peaksMap[peakInx]=
+                        {
+                            numVotes, x1, x2, glm::ivec2(t, r)
+                        };
+                    }
+                }
+            }
+        }
+        
+        //Find all the lines in each peak bin
+        for(int i=0; i<peaksMap.size(); i++)
+        {
+            if(peaksMap[i].numVotes>0)
+            {
+                DrawLine(peaksMap[i].x0, peaksMap[i].x1, linesData, width, height, glm::vec4(1,0,0,1));
+            }
+        }
+        
+        //Normalize the hough texture for visualization
+        for(int i=0; i<houghSpace.size(); i++)
+        {
+            houghSpace[i].x /= maxVotes;
+        }
+        
+
+        glBindTexture(GL_TEXTURE_2D, houghTexture.glTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, houghSpaceSize, houghSpaceSize, 0, GL_RGBA, GL_FLOAT, houghSpace.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        glBindTexture(GL_TEXTURE_2D, textureOut);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, linesData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    shouldProcess=false;
 }
 //
 //
@@ -1679,14 +1901,15 @@ void ImageLab::Load() {
     tci.srgb=true;
     tci.minFilter = GL_LINEAR;
     tci.magFilter = GL_LINEAR;
-    texture = GL_TextureFloat("resources/Tom.png", tci);
+    // texture = GL_TextureFloat("resources/Tom.png", tci);
+    texture = GL_TextureFloat("resources/Sudoku.jpeg", tci);
     tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
     Quad = GetQuad();
     
 
 
     imageProcessStack.Resize(texture.width, texture.height);
-    imageProcessStack.AddProcess(new EdgeLinking(true));
+    imageProcessStack.AddProcess(new HoughTransform(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
     // imageProcessStack.AddProcess(new Equalize(true));

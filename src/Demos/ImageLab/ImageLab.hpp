@@ -11,7 +11,7 @@
 
 struct ImageProcessStack;
 
-void Line(glm::ivec2 x0, glm::ivec2 x2, std::vector<glm::vec4> &image, int width);
+void DrawLine(glm::ivec2 x0, glm::ivec2 x2, std::vector<glm::vec4> &image, int width, int height, glm::vec4 color);
 
 struct ImageProcess
 {
@@ -235,7 +235,7 @@ struct CannyEdgeDetector : public ImageProcess
     int size=3;
     float sigma=1;
     int maxSize = 257;
-    float threshold=0.4f;
+    float threshold=0.1f;
     std::vector<float> kernel;
     GLuint kernelBuffer;
 
@@ -301,6 +301,33 @@ struct EdgeLinking : public ImageProcess
 
     float magnitudeThreshold= 0.4f;
     float angleThreshold = 0.4f;
+};
+
+struct HoughTransform : public ImageProcess
+{
+    HoughTransform(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+
+    CannyEdgeDetector *cannyEdgeDetector;
+    bool cannyChanged=true;
+
+    int hoodSize = 17;
+    int houghSpaceSize=750;
+    
+    std::vector<glm::vec4> houghSpace;
+    std::vector<glm::vec4> edgeData;
+    std::vector<glm::vec4> linesData;
+    std::vector<glm::vec4> inputData;
+
+    GL_TextureFloat houghTexture;
+
+    float threshold=266;
+
+    bool addToImage=true;
+    bool viewEdges=true;
+    bool shouldProcess=true;
 };
 
 struct Gradient : public ImageProcess
