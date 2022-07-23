@@ -284,6 +284,7 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("CannyEdgeDetector")) AddProcess(new CannyEdgeDetector(true));        
         if(ImGui::Button("EdgeLinking")) AddProcess(new EdgeLinking(true));        
         if(ImGui::Button("HoughTransform")) AddProcess(new HoughTransform(true));        
+        if(ImGui::Button("PolygonFitting")) AddProcess(new PolygonFitting(true));        
 
         ImGui::EndPopup();
     }
@@ -330,6 +331,22 @@ bool ImageProcessStack::RenderGUI()
     }
 
     return changed;
+}
+
+void ImageProcessStack::Unload()
+{
+    glDeleteProgram(histogramShader);
+    glDeleteProgram(resetHistogramShader);
+    glDeleteProgram(renderHistogramShader);
+    
+    glDeleteBuffers(1, &boundsBuffer);
+    glDeleteBuffers(1, &histogramBuffer);
+    histogramTexture.Unload();
+    for(int i=0; i<imageProcesses.size(); i++)
+    {
+        imageProcesses[i]->Unload();
+        delete imageProcesses[i];
+    }
 }
 
 //
@@ -497,6 +514,21 @@ bool Equalize::RenderGui()
     changed |= ImGui::Checkbox("Color", &color);
     return changed;
 }
+
+void Equalize::Unload()
+{
+    glDeleteBuffers(1, &lutBuffer);
+    glDeleteBuffers(1, &pdfBuffer);
+    glDeleteBuffers(1, &histogramBuffer);
+    glDeleteBuffers(1, &boundsBuffer);
+    
+    
+    glDeleteProgram(resetHistogramShader);
+    glDeleteProgram(histogramShader);
+    glDeleteProgram(buildPdfShader);
+    glDeleteProgram(buildLutShader);    
+}
+
 //
 
 //
@@ -889,6 +921,11 @@ bool GaussianBlur::RenderGui()
     changed |= shouldRecalculateKernel;
     return changed;
 }
+
+void GaussianBlur::Unload()
+{
+    glDeleteBuffers(1, &kernelBuffer);
+}
 //
 
 //
@@ -951,6 +988,11 @@ bool LaplacianOfGaussian::RenderGui()
 
     changed |= shouldRecalculateKernel;
     return changed;
+}
+
+void LaplacianOfGaussian::Unload()
+{
+    glDeleteBuffers(1, &kernelBuffer);
 }
 //
 
@@ -1030,6 +1072,11 @@ bool DifferenceOfGaussians::RenderGui()
     sigma2 = sigma1*2;
     changed |= shouldRecalculateKernel;
     return changed;
+}
+
+void DifferenceOfGaussians::Unload()
+{
+    glDeleteBuffers(1, &kernelBuffer);
 }
 //
 
@@ -1197,7 +1244,18 @@ void CannyEdgeDetector::Process(GLuint textureIn, GLuint textureOut, int width, 
 	glUseProgram(0);
 
 }
-
+void CannyEdgeDetector::Unload()
+{
+    glDeleteProgram(gradientShader);
+    glDeleteProgram(edgeShader);
+    glDeleteProgram(thresholdShader);
+    glDeleteProgram(hysteresisShader);
+    blurTexture.Unload();
+    gradientTexture.Unload();
+    edgeTexture.Unload();
+    thresholdTexture.Unload();
+    
+}
 
 //
 
@@ -1307,6 +1365,13 @@ bool GammaCorrection::RenderGui()
 EdgeLinking::EdgeLinking(bool enabled) : ImageProcess("EdgeLinking", "", enabled)
 {
     cannyEdgeDetector = new CannyEdgeDetector(true);
+}
+
+void EdgeLinking::Unload()
+{
+    glDeleteProgram(shader);
+    cannyEdgeDetector->Unload();
+    delete cannyEdgeDetector;
 }
 
 void EdgeLinking::SetUniforms()
@@ -1432,6 +1497,14 @@ HoughTransform::HoughTransform(bool enabled) : ImageProcess("HoughTransform", ""
     cannyEdgeDetector->sigma=1;
     cannyEdgeDetector->threshold=0.038f;
 }
+
+void HoughTransform::Unload()
+{
+    glDeleteProgram(shader);
+    cannyEdgeDetector->Unload();
+    delete cannyEdgeDetector;
+}
+
 
 void HoughTransform::SetUniforms()
 {
@@ -1793,8 +1866,6 @@ void PolygonFitting::Process(GLuint textureIn, GLuint textureOut, int width, int
     processPoints.push(B);
     processPoints.push(A);
 
-    int threshold = 1;
-
     while(true)
     {
         // glm::ivec2 line = points[finalPoints.top()].b - points[processPoints.top()].b;
@@ -2149,16 +2220,16 @@ void ImageLab::Load() {
     tci.srgb=true;
     tci.minFilter = GL_NEAREST;
     tci.magFilter = GL_NEAREST;
-    // texture = GL_TextureFloat("resources/Tom.png", tci);
+    texture = GL_TextureFloat("resources/Tom.png", tci);
     // texture = GL_TextureFloat("resources/Sudoku.jpeg", tci);
-    texture = GL_TextureFloat("resources/shape.png", tci);
+    // texture = GL_TextureFloat("resources/shape.png", tci);
     tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
     Quad = GetQuad();
     
 
 
     imageProcessStack.Resize(texture.width, texture.height);
-    imageProcessStack.AddProcess(new PolygonFitting(true));
+    // imageProcessStack.AddProcess(new Equalize(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
     // imageProcessStack.AddProcess(new Equalize(true));
@@ -2213,6 +2284,8 @@ void ImageLab::Unload() {
     MeshShader.Unload();
 
     texture.Unload();
+
+    imageProcessStack.Unload();
 }
 
 

@@ -16,9 +16,9 @@ void main()
     if(color.g < lowerBound.g) color.g = 0;
     if(color.b < lowerBound.b) color.b = 0;
     
-    if(color.r > upperBound.r) color.r = 255;
-    if(color.g > upperBound.g) color.g = 255;
-    if(color.b > upperBound.b) color.b = 255;
+    if(color.r > upperBound.r) color.r = 0;
+    if(color.g > upperBound.g) color.g = 0;
+    if(color.b > upperBound.b) color.b = 0;
 
     imageStore ( textureOut , pixelCoord , vec4(color, 0));
 }

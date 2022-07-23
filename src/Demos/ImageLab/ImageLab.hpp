@@ -19,6 +19,9 @@ struct ImageProcess
     virtual void Process(GLuint textureIn, GLuint textureOut, int width, int height);
     virtual void SetUniforms();
     virtual bool RenderGui();
+    virtual void Unload(){
+        glDeleteProgram(shader);
+    }
     std::string shaderFileName;
     std::string name;
     GLint shader;
@@ -27,6 +30,7 @@ struct ImageProcess
 
     bool enabled=true;
     bool CheckChanges();
+
 };
 
 struct ImageProcessStack
@@ -40,6 +44,7 @@ struct ImageProcessStack
     GLuint Process(GLuint textureIn, int width, int height);
     void AddProcess(ImageProcess* imageProcess);
     void RenderHistogram();
+    void Unload();
 
     bool RenderGUI();
 
@@ -180,7 +185,7 @@ struct GaussianBlur : public ImageProcess
     GaussianBlur(bool enabled=true);
     void SetUniforms() override;
     bool RenderGui() override;
-
+    void Unload() override;
     void RecalculateKernel();
     int size=3;
     float sigma=1;
@@ -196,7 +201,7 @@ struct LaplacianOfGaussian : public ImageProcess
     LaplacianOfGaussian(bool enabled=true);
     void SetUniforms() override;
     bool RenderGui() override;
-
+    void Unload() override;
     void RecalculateKernel();
     int size=9;
     float sigma=1.0f;
@@ -212,7 +217,7 @@ struct DifferenceOfGaussians : public ImageProcess
     DifferenceOfGaussians(bool enabled=true);
     void SetUniforms() override;
     bool RenderGui() override;
-
+    void Unload() override;
     void RecalculateKernel();
     int size=9;
     float sigma1=1.0f;
@@ -230,6 +235,7 @@ struct CannyEdgeDetector : public ImageProcess
     void SetUniforms() override;
     bool RenderGui() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+    void Unload() override;
 
     void RecalculateKernel();
     int size=3;
@@ -286,7 +292,7 @@ struct EdgeLinking : public ImageProcess
     void SetUniforms() override;
     bool RenderGui() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height);
-
+    void Unload() override;
     CannyEdgeDetector *cannyEdgeDetector;
 
     bool cannyChanged=true;
@@ -309,6 +315,7 @@ struct HoughTransform : public ImageProcess
     void SetUniforms() override;
     bool RenderGui() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+    void Unload() override;
 
     CannyEdgeDetector *cannyEdgeDetector;
     bool cannyChanged=true;
@@ -371,12 +378,12 @@ struct Equalize : public ImageProcess
     void SetUniforms() override;
     bool RenderGui() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
-    
+    void Unload() override;
     bool color=true;
     
     GLuint lutBuffer;
     GLuint pdfBuffer;
-    GLint histogramBuffer, boundsBuffer;
+    GLuint histogramBuffer, boundsBuffer;
 
     GLint resetHistogramShader;
     GLint histogramShader;
