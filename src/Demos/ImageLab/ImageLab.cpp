@@ -16,6 +16,193 @@
 
 #define MODE 2
 
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void Curve::BuildPath()
+{
+    path.resize(numEval);
+    data.resize(numEval);
+
+    int stepsPerCurve = numEval / (int)(controlPoints.size()-1);
+    int inx=0;
+    for(int i=0; i<controlPoints.size()-1; i++)
+    {
+        glm::vec2 start = controlPoints[i].point;
+        glm::vec2 startControl = controlPoints[i].control;
+        if(startControl.x < start.x)
+        {
+            glm::vec2 controlToPoint = start - startControl;
+            startControl += controlToPoint*2;
+        }
+
+        glm::vec2 end = controlPoints[i+1].point;
+        glm::vec2 endControl = controlPoints[i+1].control;
+        if(endControl.x > end.x)
+        {
+            glm::vec2 controlToPoint = end - endControl;
+            endControl += 2 * controlToPoint;
+        }      
+        double stepSize = 1 / (double)stepsPerCurve;
+        double xu = 0.0 , yu = 0.0;
+        for(int j = 0 ; j <stepsPerCurve ; j++)
+        {
+            double u = j * stepSize;
+            xu = pow(1-u,3)*start.x+3*u*pow(1-u,2)*startControl.x+3*pow(u,2)*(1-u)*endControl.x
+                +pow(u,3)*end.x;
+            yu = pow(1-u,3)*start.y+3*u*pow(1-u,2)*startControl.y+3*pow(u,2)*(1-u)*endControl.y
+                +pow(u,3)*end.y;
+            data[inx] = (float)yu;
+            path[inx++] = glm::vec2(xu, yu);
+        }
+    }       
+}
+
+float Curve::Evaluate(float t)
+{
+    t = (std::min)(1.0f, (std::max)(0.0f, t));
+    int i = (int)std::floor(t * numEval);
+    return path[i].y;
+}
+
+bool Curve::Render(ImDrawList* drawList, ImU32 curveColor)
+{
+    bool changed=false;
+
+    ImVec2 cursorPos = ImGui::GetCursorScreenPos();
+    origin.x = cursorPos.x; origin.y = cursorPos.y; 
+    ImGuiIO& io = ImGui::GetIO();
+    
+    
+    //If mouse released, reinit mouse state
+    if(io.MouseReleased[0])
+    {
+        mouseState.movingControlPoint=false;
+        mouseState.movingPoint=false;
+        mouseState.index=-1;
+    }
+
+    //If we're moving a point, move it and its control
+    if(mouseState.movingPoint)
+    {
+        controlPoints[mouseState.index].point = ScreenToGraph(glm::vec2(io.MousePos.x, io.MousePos.y));
+        controlPoints[mouseState.index].control = controlPoints[mouseState.index].point - mouseState.diff;
+        changed=true;
+    }
+
+    //If we're moving a control point
+    if(mouseState.movingControlPoint)
+    {
+        controlPoints[mouseState.index].control = ScreenToGraph(glm::vec2(io.MousePos.x, io.MousePos.y));
+        changed=true;
+    }
+
+    //Frame
+    ImGui::PushClipRect(ImVec2(origin.x, origin.y), ImVec2(origin.x + size.x, origin.y + size.y), true);
+    drawList->AddRect(ImVec2(origin.x, origin.y), ImVec2(origin.x + size.x, origin.y + size.y), IM_COL32(255, 255, 255, 255));
+    
+    // ImGui::InvisibleButton("curve", ImVec2(size.x, size.y));
+    
+    //Draw the points
+    for(int i=0; i<controlPoints.size(); i++)
+    {
+        bool hoverPoint = false;
+        bool hoverControlPoint = false;
+        
+        //Positions in screen space
+        glm::vec2 pos = GraphToScreen(controlPoints[i].point);
+        glm::vec2 controlPoint = GraphToScreen(controlPoints[i].control);
+        
+        ImU32 pointColor = IM_COL32(255,255,255,255);
+        ImU32 controlColor = IM_COL32(128,128,128,255);
+        
+        //Check if we're hovering a point or a control point
+        glm::vec2 mousePos = glm::vec2(io.MousePos.x, io.MousePos.y);
+        if(glm::distance2(mousePos, pos) < pointRadius*pointRadius) hoverPoint=true;
+        if(glm::distance2(mousePos, controlPoint) < pointRadius*pointRadius) hoverControlPoint=true;
+        
+        //Set color if hovering
+        if(hoverPoint) pointColor = IM_COL32(255,0,0,255);
+        if(hoverControlPoint) controlColor = IM_COL32(0,255,255,255);
+        
+        //If mouse pressed while hovering, set mouse state
+        if(io.MouseClicked[0] && (hoverPoint || hoverControlPoint))
+        {
+            if(hoverPoint) mouseState.movingPoint=true;
+            if(hoverControlPoint) mouseState.movingControlPoint=true;
+            mouseState.index=i;
+            mouseState.diff = controlPoints[i].point - controlPoints[i].control;
+        }
+
+        //Draw
+        drawList->AddCircleFilled(ImVec2(pos.x, pos.y), pointRadius, pointColor);
+        drawList->AddCircle(ImVec2(controlPoint.x, controlPoint.y), pointRadius, controlColor);
+    }
+
+    for(int i=0; i<controlPoints.size()-1; i++)
+    {
+        glm::vec2 start = GraphToScreen(controlPoints[i].point);
+        glm::vec2 startControl = GraphToScreen(controlPoints[i].control);
+        if(startControl.x < start.x)
+        {
+            glm::vec2 controlToPoint = start - startControl;
+            startControl += controlToPoint*2;
+        }
+
+        glm::vec2 end = GraphToScreen(controlPoints[i+1].point);
+        glm::vec2 endControl = GraphToScreen(controlPoints[i+1].control);
+        if(endControl.x > end.x)
+        {
+            glm::vec2 controlToPoint = end - endControl;
+            endControl += 2 * controlToPoint;
+        }
+        
+        drawList->AddBezierCurve(ImVec2(start.x, start.y), ImVec2(startControl.x, startControl.y),
+                                 ImVec2(endControl.x, endControl.y), ImVec2(end.x, end.y), 
+                                 curveColor, 1);
+        
+        drawList->AddLine(ImVec2(start.x, start.y), ImVec2(startControl.x, startControl.y), IM_COL32(128,128,128,255), 1);
+        drawList->AddLine(ImVec2(end.x, end.y), ImVec2(endControl.x, endControl.y), IM_COL32(128,128,128,255), 1);
+    }
+
+//Debug the evaluation
+#if 0
+	for(int i=0; i<path.size(); i++)
+    {
+        glm::vec2 p = GraphToScreen(path[i]);
+        drawList->AddNgon(ImVec2(p.x, p.y), 3, IM_COL32(255,255,255,255), 3, 1);
+    }
+#endif
+
+
+    if(changed)
+    {
+        BuildPath();
+    }
+
+    ImGui::PopClipRect();
+    return changed;
+}
+
+
+//Takes normalized coordinates between 0 and 1
+glm::vec2 Curve::GraphToScreen(glm::vec2 coord)
+{
+    glm::vec2 result(0,0);
+    result.x  = origin.x + coord.x * size.x;
+    result.y  = origin.y + size.y - coord.y * size.y;
+
+    return result;
+}
+
+glm::vec2 Curve::ScreenToGraph(glm::vec2 coord)
+{
+    glm::vec2 result = coord - origin;
+    result /= size;
+    result = glm::clamp(result, glm::vec2(0), glm::vec2(1));
+    result.y = 1 - result.y;
+    return result;
+}
+
 float DistancePointLine(glm::vec2 v, glm::vec2 w, glm::vec2 p) {
   // Return minimum distance between line segment vw and point p
   const float l2 = glm::length2(v-w);  // i.e. |w-v|^2 -  avoid a sqrt
@@ -301,6 +488,7 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("AddImage")) AddProcess(new AddImage(true));        
         if(ImGui::Button("AddColor")) AddProcess(new AddColor(true));        
         if(ImGui::Button("MultiplyImage")) AddProcess(new MultiplyImage(true));        
+        if(ImGui::Button("CurveGrading")) AddProcess(new CurveGrading(true));        
 
         ImGui::EndPopup();
     }
@@ -385,6 +573,117 @@ bool GrayScaleContrastStretch::RenderGui()
     
 
     return changed;
+}
+//
+
+//
+//------------------------------------------------------------------------
+CurveGrading::CurveGrading(bool enabled) : ImageProcess("CurveGrading", "shaders/CurveGrading.glsl", enabled)
+{
+    redCurve.controlPoints = 
+    {
+        {glm::vec2(0,0), glm::vec2(0.25,0.25)},
+        // {glm::vec2(0.25,0.5), glm::vec2(0.70,0.70)},
+        {glm::vec2(1,1), glm::vec2(0.75,0.75)},
+    };
+    greenCurve.controlPoints = redCurve.controlPoints;
+    blueCurve.controlPoints = redCurve.controlPoints;
+
+    redCurve.BuildPath();
+    greenCurve.BuildPath();
+    blueCurve.BuildPath();
+    
+    glGenBuffers(1, (GLuint*)&redLut);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, redLut);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, redCurve.data.size() * sizeof(float), redCurve.data.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, redLut);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); 
+    
+    glGenBuffers(1, (GLuint*)&greenLut);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, greenLut);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, greenCurve.data.size() * sizeof(float), greenCurve.data.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, greenLut);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); 
+    
+    glGenBuffers(1, (GLuint*)&blueLut);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, blueLut);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, blueCurve.data.size() * sizeof(float), blueCurve.data.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, blueLut);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); 
+}
+
+void CurveGrading::SetUniforms()
+{
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, redLut);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, redLut);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); 
+    
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, greenLut);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, greenLut);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); 
+    
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, blueLut);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, blueLut);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); 
+
+}
+
+bool CurveGrading::RenderGui()
+{
+    bool changed=false;
+    // ImGui::SetNextItemWidth(255); changed |= ImGui::SliderFloat("lowerBound", &lowerBound, 0, 1);
+    // ImGui::SetNextItemWidth(255); changed |= ImGui::SliderFloat("upperBound", &upperBound, 0, 1);
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+    int width = 128;
+    int height = 128;
+    
+    bool redChanged=false;
+    bool greenChanged=false;
+    bool blueChanged=false;
+
+    redCurve.size = glm::vec2(width,height);
+    if(renderRedCurve) redChanged |= redCurve.Render(drawList, IM_COL32(255, 0, 0, 255));
+    greenCurve.size = glm::vec2(width,height);
+    if(renderGreenCurve) greenChanged |= greenCurve.Render(drawList, IM_COL32(0, 255, 0, 255));
+    redCurve.size = glm::vec2(width,height);
+    if(renderBlueCurve) blueChanged |= blueCurve.Render(drawList, IM_COL32(0, 0, 255, 255));
+
+    changed |= redChanged;
+    changed |= greenChanged;
+    changed |= blueChanged;
+
+    ImGui::InvisibleButton("Padding", ImVec2((float)width, (float)height));
+    ImGui::Checkbox("Red", &renderRedCurve); ImGui::SameLine();
+    ImGui::Checkbox("Green", &renderGreenCurve); ImGui::SameLine();
+    ImGui::Checkbox("Blue", &renderBlueCurve);
+
+    if(redChanged)
+    {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, redLut);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, redCurve.data.size() * sizeof(float), redCurve.data.data(), GL_DYNAMIC_COPY); 
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    }
+
+    if(greenChanged)
+    {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, greenLut);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, greenCurve.data.size() * sizeof(float), greenCurve.data.data(), GL_DYNAMIC_COPY); 
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    }
+
+    if(blueChanged)
+    {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, blueLut);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, blueCurve.data.size() * sizeof(float), blueCurve.data.data(), GL_DYNAMIC_COPY); 
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    }
+    
+    return changed;
+}
+
+void CurveGrading::Unload() 
+{
+
 }
 //
 
@@ -949,7 +1248,18 @@ void GaussianBlur::Unload()
 AddImage::AddImage(bool enabled, char newFileName[128]) : ImageProcess("AddImage", "shaders/AddImage.glsl", enabled)
 {
     strcpy(this->fileName, newFileName);
-    if(strcmp(this->fileName, "")!=0) filenameChanged=true;
+    if(strcmp(this->fileName, "")!=0) 
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_NEAREST;
+        tci.magFilter = GL_NEAREST;        
+        
+        if(texture.loaded) texture.Unload();
+        texture = GL_TextureFloat(std::string(fileName), tci);
+        
+		filenameChanged = false;        
+    }
 }
 
 
@@ -2387,6 +2697,7 @@ void ImageLab::Load() {
     imageProcessStack.Resize(width, height);
     // imageProcessStack.AddProcess(new ColorDistance(true));
     imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.PNG"));
+    imageProcessStack.AddProcess(new CurveGrading(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
     // imageProcessStack.AddProcess(new Equalize(true));
@@ -2401,7 +2712,7 @@ void ImageLab::Process()
 void ImageLab::RenderGUI() {
     shouldProcess=false;
     ImGui::ShowDemoWindow();
-    ImGui::Begin("Processes : "); 
+    ImGui::Begin("Processes : ", nullptr, ImGuiWindowFlags_NoMove); 
 
     // ImGui::SameLine(); 
     // if(ImGui::Button("+"))

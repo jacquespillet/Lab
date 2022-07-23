@@ -7,11 +7,46 @@
 #include "GL_Helpers/GL_Camera.hpp"
 #include "GL_Helpers/GL_Texture.hpp"
 
-
+struct ImDrawList;
 
 struct ImageProcessStack;
 
+
 void DrawLine(glm::ivec2 x0, glm::ivec2 x2, std::vector<glm::vec4> &image, int width, int height, glm::vec4 color);
+
+struct Curve
+{
+    bool Curve::Render(ImDrawList* drawList, uint32_t curveColor);
+    struct bezierPoint
+    {
+        glm::vec2 point;
+        glm::vec2 control;
+    };
+    std::vector<bezierPoint> controlPoints;
+    std::vector<glm::vec2> path;
+    std::vector<float> data;
+
+    glm::vec2 GraphToScreen(glm::vec2 coord);
+    glm::vec2 ScreenToGraph(glm::vec2 coord);
+
+    float pointRadius=8;
+    
+    int numEval = 256;
+    
+    glm::vec2 origin;
+    glm::vec2 size = glm::vec2(128);
+        
+    float Evaluate(float t);
+    void BuildPath();
+    struct
+    {
+        bool movingPoint=false;
+        bool movingControlPoint=false;
+        int index=0;
+        glm::vec2 diff;
+    } mouseState;
+};
+
 
 struct ImageProcess
 {
@@ -222,6 +257,26 @@ struct MultiplyImage : public ImageProcess
     GL_TextureFloat texture;
     bool filenameChanged=false;
     float multiplier=1;
+};
+
+struct CurveGrading : public ImageProcess
+{
+    CurveGrading(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+
+    Curve redCurve;
+    Curve greenCurve;
+    Curve blueCurve;
+
+    bool renderRedCurve=true;
+    bool renderGreenCurve=false;
+    bool renderBlueCurve=false;
+    
+    GLuint redLut;
+    GLuint greenLut;
+    GLuint blueLut;
 };
 
 struct AddColor : public ImageProcess
