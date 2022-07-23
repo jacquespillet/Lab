@@ -88,16 +88,19 @@ void ImageProcess::Process(GLuint textureIn, GLuint textureOut, int width, int h
     glMemoryBarrier(GL_ALL_BARRIER_BITS);
 }
 
-void ImageProcessStack::Resize(int width, int height)
+void ImageProcessStack::Resize(int newWidth, int newHeight)
 {
-    if(tex0.loaded) tex0.Unload();
     if(tex1.loaded) tex1.Unload();
+    if(tex0.loaded) tex0.Unload();
     
     TextureCreateInfo tci = {};
     tci.minFilter = GL_NEAREST;
     tci.magFilter = GL_NEAREST;
-    tex0 = GL_TextureFloat(width, height, tci);
-    tex1 = GL_TextureFloat(width, height, tci);
+    tex1 = GL_TextureFloat(newWidth, newHeight, tci);
+    tex0 = GL_TextureFloat(newWidth, newHeight, tci);
+
+    this->width = newWidth;
+    this->height = newHeight;
 }
 
 
@@ -133,6 +136,7 @@ ImageProcessStack::ImageProcessStack()
     CreateComputeShader("shaders/Histogram.glsl", &histogramShader);
     CreateComputeShader("shaders/ResetHistogram.glsl", &resetHistogramShader);
     CreateComputeShader("shaders/RenderHistogram.glsl", &renderHistogramShader);
+    CreateComputeShader("shaders/ClearTexture.glsl", &clearTextureShader);
 
 
 }
@@ -170,8 +174,16 @@ void ImageProcessStack::RenderHistogram()
     glMemoryBarrier(GL_ALL_BARRIER_BITS);        
 }
 
-GLuint ImageProcessStack::Process(GLuint textureIn, int width, int height)
+GLuint ImageProcessStack::Process()
 {
+    //Clear the input texture
+    glUseProgram(clearTextureShader);
+    glUniform1i(glGetUniformLocation(clearTextureShader, "textureOut"), 0); //program must be active
+    glBindImageTexture(0, tex0.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    glDispatchCompute(tex0.width/32+1, tex0.height/32+1, 1);
+    glUseProgram(0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);     
+
     std::vector<ImageProcess*> activeProcesses;
     activeProcesses.reserve(imageProcesses.size());
     for(int i=0; i<imageProcesses.size(); i++)
@@ -184,8 +196,8 @@ GLuint ImageProcessStack::Process(GLuint textureIn, int width, int height)
         if(i==0)
         {
             activeProcesses[i]->Process(
-                                    textureIn,
                                     tex0.glTex,
+                                    tex1.glTex,
                                     width, 
                                     height);
         }
@@ -193,18 +205,18 @@ GLuint ImageProcessStack::Process(GLuint textureIn, int width, int height)
         {
             bool pairPass = i % 2 == 0;
             activeProcesses[i]->Process(
-                                    pairPass ? tex1.glTex : tex0.glTex, 
                                     pairPass ? tex0.glTex : tex1.glTex, 
+                                    pairPass ? tex1.glTex : tex0.glTex, 
                                     width, 
                                     height);
         }
     }
 
 
-    GLuint resultTexture = (activeProcesses.size() % 2 == 0) ? tex1.glTex : tex0.glTex;
+    GLuint resultTexture = (activeProcesses.size() % 2 == 0) ? tex0.glTex : tex1.glTex;
     if(activeProcesses.size() == 0)
     {
-        resultTexture = textureIn;
+        resultTexture = tex0.glTex;
     }
     //Pass to reset histograms
     {
@@ -931,8 +943,10 @@ void GaussianBlur::Unload()
 
 //
 //------------------------------------------------------------------------
-AddImage::AddImage(bool enabled) : ImageProcess("AddImage", "shaders/AddImage.glsl", enabled)
+AddImage::AddImage(bool enabled, char newFileName[128]) : ImageProcess("AddImage", "shaders/AddImage.glsl", enabled)
 {
+    strcpy(this->fileName, newFileName);
+    if(strcmp(this->fileName, "")!=0) filenameChanged=true;
 }
 
 
@@ -950,7 +964,7 @@ bool AddImage::RenderGui()
     bool changed=false;
     changed |= ImGui::DragFloat("multiplier", &multiplier, 0.001f);
     
-    filenameChanged = ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
     
     if(filenameChanged)
     {
@@ -961,7 +975,9 @@ bool AddImage::RenderGui()
         
         if(texture.loaded) texture.Unload();
         texture = GL_TextureFloat(std::string(fileName), tci);
-        changed=true;
+        
+		changed=true;
+		filenameChanged = false;
     }
 
     return changed;
@@ -2282,23 +2298,24 @@ ImageLab::ImageLab() {
 
 void ImageLab::Load() {
     MeshShader = GL_Shader("shaders/ImageLab/Filter.vert", "", "shaders/ImageLab/Filter.frag");
-    TextureCreateInfo tci = {};
-    tci.generateMipmaps =false;
-    tci.srgb=true;
-    tci.minFilter = GL_NEAREST;
-    tci.magFilter = GL_NEAREST;
-    texture = GL_TextureFloat("resources/Tom.png", tci);
+    // TextureCreateInfo tci = {};
+    // tci.generateMipmaps =false;
+    // tci.srgb=true;
+    // tci.minFilter = GL_NEAREST;
+    // tci.magFilter = GL_NEAREST;
+    // texture = GL_TextureFloat("resources/Tom.png", tci);
     // texture = GL_TextureFloat("resources/peppers.png", tci);
     // texture = GL_TextureFloat("resources/Sudoku.jpeg", tci);
     // texture = GL_TextureFloat("resources/shape.png", tci);
-    tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
+    
+    // tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
     Quad = GetQuad();
     
 
 
-    imageProcessStack.Resize(texture.width, texture.height);
+    imageProcessStack.Resize(width, height);
     // imageProcessStack.AddProcess(new ColorDistance(true));
-    imageProcessStack.AddProcess(new AddImage(true));
+    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.PNG"));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
     // imageProcessStack.AddProcess(new Equalize(true));
@@ -2332,7 +2349,7 @@ void ImageLab::Render() {
     if(shouldProcess || firstFrame)
     {
         std::cout << "PROCESSING "<< std::endl;
-        outTexture = imageProcessStack.Process(texture.glTex,texture.width, texture.height);
+        outTexture = imageProcessStack.Process();
         shouldProcess=false;
     }
 
@@ -2351,8 +2368,6 @@ void ImageLab::Unload() {
     delete Quad;
 
     MeshShader.Unload();
-
-    texture.Unload();
 
     imageProcessStack.Unload();
 }

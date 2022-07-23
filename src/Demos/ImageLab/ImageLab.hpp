@@ -41,7 +41,7 @@ struct ImageProcessStack
     ImageProcessStack();
     void Resize(int width, int height);
     std::vector<ImageProcess*> imageProcesses;
-    GLuint Process(GLuint textureIn, int width, int height);
+    GLuint Process();
     void AddProcess(ImageProcess* imageProcess);
     void RenderHistogram();
     void Unload();
@@ -50,11 +50,13 @@ struct ImageProcessStack
 
     bool histogramR=true, histogramG=true, histogramB=true, histogramGray=false;
     float minValueGray, maxValueGray;
-    GLint histogramShader, resetHistogramShader, renderHistogramShader;
+    GLint histogramShader, resetHistogramShader, renderHistogramShader, clearTextureShader;
     GLuint histogramBuffer, boundsBuffer;
     GL_TextureFloat histogramTexture;
 
     bool changed=false;
+
+    int width, height;
 };
 
 
@@ -198,7 +200,7 @@ struct GaussianBlur : public ImageProcess
 
 struct AddImage : public ImageProcess
 {
-    AddImage(bool enabled=true);
+    AddImage(bool enabled=true, char* fileName="");
     void SetUniforms() override;
     bool RenderGui() override;
     void Unload() override;
@@ -207,7 +209,7 @@ struct AddImage : public ImageProcess
     char fileName[128];
     GL_TextureFloat texture;
     bool filenameChanged=false;
-    float multiplier;
+    float multiplier=1;
 };
 
 struct LaplacianOfGaussian : public ImageProcess
@@ -463,9 +465,10 @@ private:
     GL_Shader MeshShader;
     GL_Mesh* Quad;
     
-    GL_TextureFloat texture;
-    GL_TextureFloat tmpTexture;
-    
+    // GL_TextureFloat texture;
+    // GL_TextureFloat tmpTexture;
+    int width = 1920;
+    int height = 1080;
 
     ImageProcessStack imageProcessStack;
 
