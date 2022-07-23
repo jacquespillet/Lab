@@ -196,6 +196,20 @@ struct GaussianBlur : public ImageProcess
     bool shouldRecalculateKernel=true;
 };
 
+struct AddImage : public ImageProcess
+{
+    AddImage(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    void RecalculateKernel();
+
+    char fileName[128];
+    GL_TextureFloat texture;
+    bool filenameChanged=false;
+    float multiplier;
+};
+
 struct LaplacianOfGaussian : public ImageProcess
 {
     LaplacianOfGaussian(bool enabled=true);
@@ -284,6 +298,16 @@ struct GammaCorrection : public ImageProcess
     void SetUniforms() override;
     bool RenderGui() override;
     float gamma=2.2f;
+};
+
+struct ColorDistance : public ImageProcess
+{
+    ColorDistance(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    
+    glm::vec3 color;
+    float distance;
 };
 
 struct EdgeLinking : public ImageProcess

@@ -285,6 +285,7 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("EdgeLinking")) AddProcess(new EdgeLinking(true));        
         if(ImGui::Button("HoughTransform")) AddProcess(new HoughTransform(true));        
         if(ImGui::Button("PolygonFitting")) AddProcess(new PolygonFitting(true));        
+        if(ImGui::Button("ColorDistance")) AddProcess(new ColorDistance(true));        
 
         ImGui::EndPopup();
     }
@@ -930,6 +931,50 @@ void GaussianBlur::Unload()
 
 //
 //------------------------------------------------------------------------
+AddImage::AddImage(bool enabled) : ImageProcess("AddImage", "shaders/AddImage.glsl", enabled)
+{
+}
+
+
+void AddImage::SetUniforms()
+{
+    glUniform1f(glGetUniformLocation(shader, "multiplier"), multiplier);    
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture.glTex);
+    glUniform1i(glGetUniformLocation(shader, "textureToAdd"), 0);
+}
+
+bool AddImage::RenderGui()
+{
+    bool changed=false;
+    changed |= ImGui::DragFloat("multiplier", &multiplier, 0.001f);
+    
+    filenameChanged = ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    
+    if(filenameChanged)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_NEAREST;
+        tci.magFilter = GL_NEAREST;        
+        
+        if(texture.loaded) texture.Unload();
+        texture = GL_TextureFloat(std::string(fileName), tci);
+        changed=true;
+    }
+
+    return changed;
+}
+
+void AddImage::Unload()
+{
+    texture.Unload();
+}
+//
+
+//
+//------------------------------------------------------------------------
 LaplacianOfGaussian::LaplacianOfGaussian(bool enabled) : ImageProcess("LaplacianOfGaussian", "shaders/LaplacianOfGaussian.glsl", enabled)
 {
     kernel.resize(maxSize * maxSize);
@@ -1162,8 +1207,8 @@ void CannyEdgeDetector::Process(GLuint textureIn, GLuint textureOut, int width, 
         TextureCreateInfo tci = {};
         tci.generateMipmaps =false;
         tci.srgb=true;
-        tci.minFilter = GL_LINEAR;
-        tci.magFilter = GL_LINEAR;        
+        tci.minFilter = GL_NEAREST;
+        tci.magFilter = GL_NEAREST;        
         blurTexture = GL_TextureFloat(width, height, tci);        
         gradientTexture = GL_TextureFloat(width, height, tci);        
         edgeTexture = GL_TextureFloat(width, height, tci);        
@@ -1362,6 +1407,28 @@ bool GammaCorrection::RenderGui()
 
 //
 //------------------------------------------------------------------------
+ColorDistance::ColorDistance(bool enabled) : ImageProcess("ColorDistance", "shaders/ColorDistance.glsl", enabled)
+{
+    
+}
+
+void ColorDistance::SetUniforms()
+{
+    glUniform1f(glGetUniformLocation(shader, "clipDistance"), distance);
+    glUniform3fv(glGetUniformLocation(shader, "clipColor"), 1, glm::value_ptr(color));
+}
+
+bool ColorDistance::RenderGui()
+{
+    bool changed=false;
+    changed |= ImGui::ColorEdit3("Color", &color[0]);
+    changed |= ImGui::DragFloat("Distance", &distance, 0.001f);
+    return changed;
+}
+//
+
+//
+//------------------------------------------------------------------------
 EdgeLinking::EdgeLinking(bool enabled) : ImageProcess("EdgeLinking", "", enabled)
 {
     cannyEdgeDetector = new CannyEdgeDetector(true);
@@ -1549,8 +1616,8 @@ void HoughTransform::Process(GLuint textureIn, GLuint textureOut, int width, int
             TextureCreateInfo tci = {};
             tci.generateMipmaps =false;
             tci.srgb=true;
-            tci.minFilter = GL_LINEAR;
-            tci.magFilter = GL_LINEAR;     
+            tci.minFilter = GL_NEAREST;
+            tci.magFilter = GL_NEAREST;     
             if(houghTexture.loaded) houghTexture.Unload();   
             houghTexture = GL_TextureFloat(houghSpaceSize, houghSpaceSize, tci);        
         }
@@ -2221,6 +2288,7 @@ void ImageLab::Load() {
     tci.minFilter = GL_NEAREST;
     tci.magFilter = GL_NEAREST;
     texture = GL_TextureFloat("resources/Tom.png", tci);
+    // texture = GL_TextureFloat("resources/peppers.png", tci);
     // texture = GL_TextureFloat("resources/Sudoku.jpeg", tci);
     // texture = GL_TextureFloat("resources/shape.png", tci);
     tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
@@ -2229,7 +2297,8 @@ void ImageLab::Load() {
 
 
     imageProcessStack.Resize(texture.width, texture.height);
-    // imageProcessStack.AddProcess(new Equalize(true));
+    // imageProcessStack.AddProcess(new ColorDistance(true));
+    imageProcessStack.AddProcess(new AddImage(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
     // imageProcessStack.AddProcess(new Equalize(true));
