@@ -298,6 +298,9 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("HoughTransform")) AddProcess(new HoughTransform(true));        
         if(ImGui::Button("PolygonFitting")) AddProcess(new PolygonFitting(true));        
         if(ImGui::Button("ColorDistance")) AddProcess(new ColorDistance(true));        
+        if(ImGui::Button("AddImage")) AddProcess(new AddImage(true));        
+        if(ImGui::Button("AddColor")) AddProcess(new AddColor(true));        
+        if(ImGui::Button("MultiplyImage")) AddProcess(new MultiplyImage(true));        
 
         ImGui::EndPopup();
     }
@@ -986,6 +989,74 @@ bool AddImage::RenderGui()
 void AddImage::Unload()
 {
     texture.Unload();
+}
+//
+
+//
+//------------------------------------------------------------------------
+MultiplyImage::MultiplyImage(bool enabled, char newFileName[128]) : ImageProcess("MultiplyImage", "shaders/MultiplyImage.glsl", enabled)
+{
+    strcpy(this->fileName, newFileName);
+    if(strcmp(this->fileName, "")!=0) filenameChanged=true;
+}
+
+
+void MultiplyImage::SetUniforms()
+{
+    glUniform1f(glGetUniformLocation(shader, "multiplier"), multiplier);    
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture.glTex);
+    glUniform1i(glGetUniformLocation(shader, "textureToMultiply"), 0);
+}
+
+bool MultiplyImage::RenderGui()
+{
+    bool changed=false;
+    changed |= ImGui::DragFloat("multiplier", &multiplier, 0.001f);
+    
+    filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    
+    if(filenameChanged)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_NEAREST;
+        tci.magFilter = GL_NEAREST;        
+        
+        if(texture.loaded) texture.Unload();
+        texture = GL_TextureFloat(std::string(fileName), tci);
+        
+		changed=true;
+		filenameChanged = false;
+    }
+
+    return changed;
+}
+
+void MultiplyImage::Unload()
+{
+    texture.Unload();
+}
+//
+
+//
+//------------------------------------------------------------------------
+AddColor::AddColor(bool enabled) : ImageProcess("AddColor", "shaders/AddColor.glsl", enabled)
+{
+}
+
+
+void AddColor::SetUniforms()
+{
+    glUniform3fv(glGetUniformLocation(shader, "color"),1, glm::value_ptr(color));    
+}
+
+bool AddColor::RenderGui()
+{
+    bool changed=false;
+    changed |= ImGui::ColorEdit3("color", &color[0]);
+    return changed;
 }
 //
 

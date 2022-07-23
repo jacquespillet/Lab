@@ -204,12 +204,32 @@ struct AddImage : public ImageProcess
     void SetUniforms() override;
     bool RenderGui() override;
     void Unload() override;
-    void RecalculateKernel();
 
     char fileName[128];
     GL_TextureFloat texture;
     bool filenameChanged=false;
     float multiplier=1;
+};
+
+struct MultiplyImage : public ImageProcess
+{
+    MultiplyImage(bool enabled=true, char* fileName="");
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+
+    char fileName[128];
+    GL_TextureFloat texture;
+    bool filenameChanged=false;
+    float multiplier=1;
+};
+
+struct AddColor : public ImageProcess
+{
+    AddColor(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    glm::vec3 color;
 };
 
 struct LaplacianOfGaussian : public ImageProcess

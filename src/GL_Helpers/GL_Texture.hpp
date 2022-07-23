@@ -30,13 +30,16 @@ public:
         // data = stbi_loadf(filename.c_str(), &width, &height, &nChannels, 0);
         
         uint8_t* charData = stbi_load(filename.c_str(), &width, &height, &nChannels, 4);
-        data = (glm::vec4*)malloc(width * height * sizeof(glm::vec4));
-        for(int i=0; i<width * height; i++)
+        if(charData)
         {
-            data[i].r = (float)charData[i * 4 + 0] / 255.0f;
-            data[i].g = (float)charData[i * 4 + 1] / 255.0f;
-            data[i].b = (float)charData[i * 4 + 2] / 255.0f;
-            data[i].a = (float)charData[i * 4 + 3] / 255.0f;
+            data = (glm::vec4*)malloc(width * height * sizeof(glm::vec4));
+            for(int i=0; i<width * height; i++)
+            {
+                data[i].r = (float)charData[i * 4 + 0] / 255.0f;
+                data[i].g = (float)charData[i * 4 + 1] / 255.0f;
+                data[i].b = (float)charData[i * 4 + 2] / 255.0f;
+                data[i].a = (float)charData[i * 4 + 3] / 255.0f;
+            }
         }
 
 #if 0
