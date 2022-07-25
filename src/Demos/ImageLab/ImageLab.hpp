@@ -124,6 +124,17 @@ struct Negative : public ImageProcess
     bool RenderGui() override;
 };
 
+struct LocalThreshold : public ImageProcess
+{
+    LocalThreshold(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+
+    int size=3;
+    float a=1;
+    float b=1;
+};
+
 struct Threshold : public ImageProcess
 {
     Threshold(bool enabled=true);
@@ -239,11 +250,13 @@ struct AddImage : public ImageProcess
     void SetUniforms() override;
     bool RenderGui() override;
     void Unload() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
 
     char fileName[128];
     GL_TextureFloat texture;
     bool filenameChanged=false;
     float multiplier=1;
+    float aspectRatio;
 };
 
 struct MultiplyImage : public ImageProcess
@@ -410,6 +423,30 @@ struct EdgeLinking : public ImageProcess
     float angleThreshold = 0.4f;
 };
 
+struct RegionGrow : public ImageProcess
+{
+    RegionGrow(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+    void Unload() override;
+
+    glm::vec2 clickedPoint = glm::vec2(-1,-1);
+    std::vector<glm::vec4> inputData;
+    std::vector<glm::vec4> mask;
+    std::vector<bool> tracker;
+    float threshold=0.1f;
+
+    enum class OutputType
+    {
+        AddColorToImage,
+        Mask,
+        Isolate
+    };
+    OutputType outputType;
+    
+};
+
 struct HoughTransform : public ImageProcess
 {
     HoughTransform(bool enabled=true);
@@ -449,6 +486,16 @@ struct PolygonFitting : public ImageProcess
 
     float threshold=1;
 
+    std::vector<glm::vec4> inputData;
+};
+
+struct OtsuThreshold : public ImageProcess
+{
+    OtsuThreshold(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+    float threshold=1;
     std::vector<glm::vec4> inputData;
 };
 
@@ -542,8 +589,8 @@ private:
     
     // GL_TextureFloat texture;
     // GL_TextureFloat tmpTexture;
-    int width = 1920;
-    int height = 1080;
+    int width = 1024;
+    int height = 1024;
 
     ImageProcessStack imageProcessStack;
 

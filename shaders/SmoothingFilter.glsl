@@ -15,8 +15,8 @@ void main()
     ivec2 imgSize = imageSize(textureIn);
 
     int halfSize = size /2 ;
-    float inverseSize = 1.0f / float(size * size);
     vec3 color = vec3(0,0,0);
+    int count=0;
     for(int xx = pixelCoord.x - halfSize; xx <= pixelCoord.x + halfSize; xx++)
     {
         for(int yy = pixelCoord.y - halfSize; yy <= pixelCoord.y + halfSize; yy++)
@@ -28,8 +28,10 @@ void main()
             if(samplePos.x > imgSize.x-1) samplePos.x=imgSize.x-1;
             if(samplePos.y > imgSize.y-1) samplePos.y=imgSize.y-1;
 
-            color += imageLoad(textureIn, samplePos).rgb * inverseSize;
+            color += imageLoad(textureIn, samplePos).rgb;
+            count++;
         }
     }
+    color /= float(count);
     imageStore ( textureOut , pixelCoord , vec4(color, 0));
 }

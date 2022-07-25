@@ -100,8 +100,6 @@ bool Curve::Render(ImDrawList* drawList, ImU32 curveColor)
     ImGui::PushClipRect(ImVec2(origin.x, origin.y), ImVec2(origin.x + size.x, origin.y + size.y), true);
     drawList->AddRect(ImVec2(origin.x, origin.y), ImVec2(origin.x + size.x, origin.y + size.y), IM_COL32(255, 255, 255, 255));
     
-    // ImGui::InvisibleButton("curve", ImVec2(size.x, size.y));
-    
     //Draw the points
     for(int i=0; i<controlPoints.size(); i++)
     {
@@ -174,8 +172,36 @@ bool Curve::Render(ImDrawList* drawList, ImU32 curveColor)
 #endif
 
 
+//Add control points
+#if 0
+    //Find position on the curve
+    float mousePosGraphX = ScreenToGraph(glm::vec2(io.MousePos.x, 0)).x;
+    int mouseInx = (int)(mousePosGraphX * (float)numEval);
+    float mousePosGraphY = path[mouseInx].y;
+    //Draw a circle at this position
+    glm::vec2 posOnCurveScreen = GraphToScreen(glm::vec2(0, mousePosGraphY));
+    drawList->AddCircleFilled(ImVec2(io.MousePos.x, posOnCurveScreen.y), 3, IM_COL32(164,164,164,255));
+    
+    if(io.MouseClicked[0] && !mouseState.movingControlPoint && !mouseState.movingPoint)
+    {
+        controlPoints.push_back(
+            {
+                glm::vec2(mousePosGraphX, mousePosGraphY),
+                glm::vec2(mousePosGraphX, mousePosGraphY) + glm::vec2(0.3f, 0.3f)
+            }
+        );
+        changed=true;
+    }
+#endif
+
     if(changed)
     {
+#if 0
+        std::sort(controlPoints.begin(), controlPoints.end(), [](const bezierPoint& a, const bezierPoint &b) -> bool 
+        {
+            return a.point.x < b.point.x;
+        });
+#endif
         BuildPath();
     }
 
@@ -232,9 +258,9 @@ void DrawLine(glm::ivec2 x0, glm::ivec2 x1, std::vector<glm::vec4> &image, int w
     int y = x0.y; 
     for (int x=x0.x; x<=x1.x; x++) { 
         if (steep) { 
-            if(x < width && x>=0 && y < height && y >=0) image[x * width + y] = color;
+            if((x * width + y) >=0 && (x * width + y) < image.size()) image[x * width + y] = color;
         } else { 
-            if(y < width && y>=0 && x < height && x >=0)  image[y * width + x] = color;
+            if((y * width + x) >= 0 && (y * width + x) < image.size())  image[y * width + x] = color;
         } 
         error += derror; 
         if (error>.5) { 
@@ -281,8 +307,8 @@ void ImageProcessStack::Resize(int newWidth, int newHeight)
     if(tex0.loaded) tex0.Unload();
     
     TextureCreateInfo tci = {};
-    tci.minFilter = GL_NEAREST;
-    tci.magFilter = GL_NEAREST;
+    tci.minFilter = GL_LINEAR;
+    tci.magFilter = GL_LINEAR;
     tex1 = GL_TextureFloat(newWidth, newHeight, tci);
     tex0 = GL_TextureFloat(newWidth, newHeight, tci);
 
@@ -316,8 +342,8 @@ ImageProcessStack::ImageProcessStack()
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
 
     TextureCreateInfo tci = {};
-    tci.minFilter = GL_NEAREST;
-    tci.magFilter = GL_NEAREST;
+    tci.minFilter = GL_LINEAR;
+    tci.magFilter = GL_LINEAR;
     histogramTexture = GL_TextureFloat(256, 256, tci);
 
     CreateComputeShader("shaders/Histogram.glsl", &histogramShader);
@@ -405,6 +431,7 @@ GLuint ImageProcessStack::Process()
     {
         resultTexture = tex0.glTex;
     }
+    
     //Pass to reset histograms
     {
         glUseProgram(resetHistogramShader);
@@ -449,10 +476,10 @@ bool ImageProcessStack::RenderGUI()
     changed=false;
     
     ImGui::Image((ImTextureID)histogramTexture.glTex, ImVec2(255, 255));
-    ImGui::Checkbox("R", &histogramR); ImGui::SameLine(); 
-    ImGui::Checkbox("G", &histogramG); ImGui::SameLine();
-    ImGui::Checkbox("B", &histogramB); ImGui::SameLine();
-    ImGui::Checkbox("Gray", &histogramGray);
+    changed |= ImGui::Checkbox("R", &histogramR); ImGui::SameLine(); 
+    changed |= ImGui::Checkbox("G", &histogramG); ImGui::SameLine();
+    changed |= ImGui::Checkbox("B", &histogramB); ImGui::SameLine();
+    changed |= ImGui::Checkbox("Gray", &histogramGray);
     
     ImGui::Button("+");
     if (ImGui::BeginPopupContextItem("HBEFKWJJNFOIKWEJNF", 0))
@@ -488,7 +515,10 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("AddImage")) AddProcess(new AddImage(true));        
         if(ImGui::Button("AddColor")) AddProcess(new AddColor(true));        
         if(ImGui::Button("MultiplyImage")) AddProcess(new MultiplyImage(true));        
-        if(ImGui::Button("CurveGrading")) AddProcess(new CurveGrading(true));        
+        if(ImGui::Button("CurveGrading")) AddProcess(new CurveGrading(true));
+        if(ImGui::Button("OtsuThreshold")) AddProcess(new OtsuThreshold(true));
+        if(ImGui::Button("LocalThreshold")) AddProcess(new LocalThreshold(true));
+        if(ImGui::Button("RegionGrow")) AddProcess(new RegionGrow(true));
 
         ImGui::EndPopup();
     }
@@ -902,11 +932,36 @@ bool Negative::RenderGui()
 
 //
 //------------------------------------------------------------------------
+LocalThreshold::LocalThreshold(bool enabled) : ImageProcess("LocalThreshold", "shaders/LocalThreshold.glsl", enabled)
+{
+    
+}
+
+void LocalThreshold::SetUniforms()
+{
+    glUniform1i(glGetUniformLocation(shader, "size"), size);  
+    glUniform1f(glGetUniformLocation(shader, "a"), a);  
+    glUniform1f(glGetUniformLocation(shader, "b"), b);  
+}
+
+bool LocalThreshold::RenderGui()
+{ 
+    bool changed=false;
+    changed |= ImGui::SliderInt("Size", &size, 0, 33);
+    changed |= ImGui::DragFloat("A", &a, 0.001f);
+    changed |= ImGui::DragFloat("B", &b, 0.001f);
+    return changed;
+}
+//
+
+//
+//------------------------------------------------------------------------
 Threshold::Threshold(bool enabled) : ImageProcess("Threshold", "shaders/Threshold.glsl", enabled)
 {}
 
 void Threshold::SetUniforms()
 {
+    glUniform1i(glGetUniformLocation(shader, "global"), (int)global);
     if(global)
     {
         glUniform3f(glGetUniformLocation(shader, "lowerBound"), globalLower, globalLower, globalLower);
@@ -1252,12 +1307,12 @@ AddImage::AddImage(bool enabled, char newFileName[128]) : ImageProcess("AddImage
     {
         TextureCreateInfo tci = {};
         tci.generateMipmaps =false;
-        tci.minFilter = GL_NEAREST;
-        tci.magFilter = GL_NEAREST;        
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
         
         if(texture.loaded) texture.Unload();
         texture = GL_TextureFloat(std::string(fileName), tci);
-        
+        aspectRatio = (float)texture.width / (float)texture.height;
 		filenameChanged = false;        
     }
 }
@@ -1265,11 +1320,16 @@ AddImage::AddImage(bool enabled, char newFileName[128]) : ImageProcess("AddImage
 
 void AddImage::SetUniforms()
 {
+    
     glUniform1f(glGetUniformLocation(shader, "multiplier"), multiplier);    
+    glUniform1f(glGetUniformLocation(shader, "aspectRatio"), aspectRatio);    
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture.glTex);
-    glUniform1i(glGetUniformLocation(shader, "textureToAdd"), 0);
+
+    glUniform1i(glGetUniformLocation(shader, "textureToAdd"), 2); //program must be active
+    glBindImageTexture(2, texture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+
+    
+    
 }
 
 bool AddImage::RenderGui()
@@ -1283,8 +1343,8 @@ bool AddImage::RenderGui()
     {
         TextureCreateInfo tci = {};
         tci.generateMipmaps =false;
-        tci.minFilter = GL_NEAREST;
-        tci.magFilter = GL_NEAREST;        
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
         
         if(texture.loaded) texture.Unload();
         texture = GL_TextureFloat(std::string(fileName), tci);
@@ -1299,6 +1359,29 @@ bool AddImage::RenderGui()
 void AddImage::Unload()
 {
     texture.Unload();
+}
+
+void AddImage::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    if(texture.loaded)
+    {
+        glm::ivec2 offset = glm::ivec2(width, height) - glm::ivec2(texture.width, texture.height);
+        offset /=2;
+        glUseProgram(shader);
+        SetUniforms();
+
+        glUniform2iv(glGetUniformLocation(shader, "offset"), 1, glm::value_ptr(offset)); //program must be active
+        
+        glUniform1i(glGetUniformLocation(shader, "textureIn"), 0); //program must be active
+        glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+
+        glUniform1i(glGetUniformLocation(shader, "textureOut"), 1); //program must be active
+        glBindImageTexture(1, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+    }
 }
 //
 
@@ -1331,8 +1414,8 @@ bool MultiplyImage::RenderGui()
     {
         TextureCreateInfo tci = {};
         tci.generateMipmaps =false;
-        tci.minFilter = GL_NEAREST;
-        tci.magFilter = GL_NEAREST;        
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
         
         if(texture.loaded) texture.Unload();
         texture = GL_TextureFloat(std::string(fileName), tci);
@@ -1604,8 +1687,8 @@ void CannyEdgeDetector::Process(GLuint textureIn, GLuint textureOut, int width, 
         TextureCreateInfo tci = {};
         tci.generateMipmaps =false;
         tci.srgb=true;
-        tci.minFilter = GL_NEAREST;
-        tci.magFilter = GL_NEAREST;        
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
         blurTexture = GL_TextureFloat(width, height, tci);        
         gradientTexture = GL_TextureFloat(width, height, tci);        
         edgeTexture = GL_TextureFloat(width, height, tci);        
@@ -1954,6 +2037,125 @@ void EdgeLinking::Process(GLuint textureIn, GLuint textureOut, int width, int he
 
 //
 //------------------------------------------------------------------------
+RegionGrow::RegionGrow(bool enabled) : ImageProcess("RegionGrow", "", enabled)
+{
+}
+
+void RegionGrow::Unload()
+{
+    glDeleteProgram(shader);
+}
+
+void RegionGrow::SetUniforms()
+{
+}
+
+bool RegionGrow::RenderGui()
+{
+    bool changed=false;
+    
+    ImGuiIO& io = ImGui::GetIO();
+    
+    std::cout << ImGui::IsWindowHovered() << std::endl;
+    if(io.MouseClicked[0] && !ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered())
+    {
+        std::cout << "HERE "<< std::endl;
+        changed=true;
+        clickedPoint = glm::vec2(io.MousePos.x, io.MousePos.y) / glm::vec2(io.DisplaySize.x, io.DisplaySize.y);
+    }
+    else
+    {
+        changed=false;
+        clickedPoint = glm::vec2(-1, -1);
+    }
+
+    ImGui::SliderFloat("Threshold", &threshold, 0, 1);
+    ImGui::Combo("Output Type", (int*)&outputType, "Add\0Mask\0Isolate\0\0");
+    
+    return changed;
+}
+
+
+void RegionGrow::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    inputData.resize(width * height);
+    mask.resize(width * height);
+    tracker.resize(width * height);
+    std::fill(mask.begin(), mask.end(), glm::vec4(0,0,0,1));
+    std::fill(tracker.begin(), tracker.end(), false);
+    glBindTexture(GL_TEXTURE_2D, textureIn);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+
+
+    if(clickedPoint.x >=0) 
+    {
+        glm::ivec2 clickedPointTextureSpace = glm::ivec2(clickedPoint * glm::vec2(width, height));
+        std::stack<glm::ivec2> pointsToExplore;
+
+        glm::vec3 currentPointColor = inputData[clickedPointTextureSpace.y * width + clickedPointTextureSpace.x];
+        
+        pointsToExplore.push(clickedPointTextureSpace);
+        while(pointsToExplore.size() !=0)
+        {
+            glm::ivec2 currentPoint = pointsToExplore.top();
+            pointsToExplore.pop();
+
+
+            for(int y=-1; y<=1; y++)
+            {
+                for(int x=-1; x<=1; x++)
+                {
+                    glm::ivec2 coord = currentPoint + glm::ivec2(x, y);
+					if (coord.x >= 0 && coord.x < width && coord.y >= 0 && coord.y < height)
+					{
+						glm::vec3 color = inputData[coord.y * width + coord.x];
+						if(glm::distance(color, currentPointColor) < threshold && tracker[coord.y * width + coord.x] == false)
+						{
+							pointsToExplore.push(coord);
+                            tracker[coord.y * width + coord.x]=true;
+                            if(outputType == OutputType::AddColorToImage)
+                            {
+							    inputData[coord.y * width + coord.x] = glm::vec4(1,0,0,1);
+                            }
+                            else if(outputType == OutputType::Mask)
+                            {
+                                mask[coord.y * width + coord.x] = glm::vec4(1,1,1,1);
+                            }
+                            else if(outputType == OutputType::Isolate)
+                            {
+                                mask[coord.y * width + coord.x] = inputData[coord.y * width + coord.x];
+                            }
+						}
+					}
+                }
+            }
+        }
+    }
+
+    if(outputType==OutputType::AddColorToImage)
+    {
+        glBindTexture(GL_TEXTURE_2D, textureOut);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, inputData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    else
+    {
+        glBindTexture(GL_TEXTURE_2D, textureOut);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, mask.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+}
+//
+//
+
+//
+//------------------------------------------------------------------------
 HoughTransform::HoughTransform(bool enabled) : ImageProcess("HoughTransform", "", enabled)
 {
     cannyEdgeDetector = new CannyEdgeDetector(true);
@@ -2013,8 +2215,8 @@ void HoughTransform::Process(GLuint textureIn, GLuint textureOut, int width, int
             TextureCreateInfo tci = {};
             tci.generateMipmaps =false;
             tci.srgb=true;
-            tci.minFilter = GL_NEAREST;
-            tci.magFilter = GL_NEAREST;     
+            tci.minFilter = GL_LINEAR;
+            tci.magFilter = GL_LINEAR;     
             if(houghTexture.loaded) houghTexture.Unload();   
             houghTexture = GL_TextureFloat(houghSpaceSize, houghSpaceSize, tci);        
         }
@@ -2420,6 +2622,127 @@ void PolygonFitting::Process(GLuint textureIn, GLuint textureOut, int width, int
 }
 //
 //
+//
+//------------------------------------------------------------------------
+OtsuThreshold::OtsuThreshold(bool enabled) : ImageProcess("OtsuThreshold", "shaders/Threshold.glsl", enabled)
+{
+}
+
+void OtsuThreshold::SetUniforms()
+{
+    glUniform1i(glGetUniformLocation(shader, "global"), 1);
+    glUniform3f(glGetUniformLocation(shader, "lowerBound"), 0,0,0);
+    glUniform3f(glGetUniformLocation(shader, "upperBound"), threshold,threshold,threshold);
+}
+
+bool OtsuThreshold::RenderGui()
+{
+    bool changed=false;
+    return changed;
+}
+
+
+void OtsuThreshold::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    //Read back color data
+    inputData.resize(width * height, glm::vec4(0));
+    glBindTexture(GL_TEXTURE_2D, textureIn);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    std::vector<float> probabilities(255, 0);
+    float globalMean=0;
+    float inverseSize = 1.0f / (float)inputData.size();
+    for(int i=0; i<inputData.size(); i++)
+    {
+        float grayScale = (inputData[i].r + inputData[i].g +inputData[i].b) * 0.33333f;
+        int grayScaleInt = (int)(grayScale * 255.0f);
+        
+        probabilities[grayScaleInt]+= inverseSize;
+        globalMean += inverseSize * grayScale;
+    }
+    
+    float globalVariance=0;
+    for(int i=0; i<inputData.size(); i++)
+    {
+		float grayScale = (inputData[i].r + inputData[i].g + inputData[i].b) * 0.33333f;
+		int grayScaleInt = (int)(grayScale * 255.0f);
+
+        globalVariance += (i - globalMean) * (i - globalMean) * probabilities[grayScaleInt];
+    }
+
+//Test
+#if 1
+    float sum=0;
+    for(int i=0; i<probabilities.size(); i++)
+    {
+        sum += probabilities[i];
+    }
+
+#endif
+
+
+    float maxThreshold=-1;
+    float maxVariance=-1;
+    for(int j=0; j<255; j++)
+    {
+		float p1=0;
+		float p2=0;
+		float m1Mean=0;
+		float m2Mean=0;
+        float currentThreshold = (float)j / (float)255;
+
+		for(int i=0; i<255; i++)
+        {
+            if(i<j)
+            {
+                p1 += probabilities[i];
+                m1Mean += i * probabilities[i];
+            }
+            else
+            {
+                m2Mean += i * probabilities[i];
+            }
+        }
+		m1Mean /= 255.0f;
+		m2Mean /= 255.0f;
+
+        p2 = 1.0f - p1;
+		if (p1 > 0 && p2 > 0)
+		{
+            m1Mean /= (float)p1;
+            m2Mean /= (float)p2;
+
+			float variance = p1 * (m1Mean - globalMean) * (m1Mean - globalMean) + p2 * (m2Mean - globalMean) * (m2Mean - globalMean);
+			variance /= globalVariance;
+			if(variance > maxVariance)
+			{
+				maxVariance = variance;
+				maxThreshold=currentThreshold;
+			}
+		}
+    }
+    threshold=maxThreshold;
+
+	glUseProgram(shader);
+	SetUniforms();
+
+	glUniform1i(glGetUniformLocation(shader, "textureIn"), 0); //program must be active
+    glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+	
+    glUniform1i(glGetUniformLocation(shader, "textureOut"), 1); //program must be active
+    glBindImageTexture(1, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+     
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+	glUseProgram(0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);    
+}
+//
+//
 
 
 //
@@ -2679,25 +3002,16 @@ ImageLab::ImageLab() {
 
 void ImageLab::Load() {
     MeshShader = GL_Shader("shaders/ImageLab/Filter.vert", "", "shaders/ImageLab/Filter.frag");
-    // TextureCreateInfo tci = {};
-    // tci.generateMipmaps =false;
-    // tci.srgb=true;
-    // tci.minFilter = GL_NEAREST;
-    // tci.magFilter = GL_NEAREST;
-    // texture = GL_TextureFloat("resources/Tom.png", tci);
-    // texture = GL_TextureFloat("resources/peppers.png", tci);
-    // texture = GL_TextureFloat("resources/Sudoku.jpeg", tci);
-    // texture = GL_TextureFloat("resources/shape.png", tci);
-    
-    // tmpTexture = GL_TextureFloat(texture.width, texture.height, tci);
     Quad = GetQuad();
     
 
 
     imageProcessStack.Resize(width, height);
     // imageProcessStack.AddProcess(new ColorDistance(true));
-    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.PNG"));
-    imageProcessStack.AddProcess(new CurveGrading(true));
+    // imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.PNG"));
+    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Apple.jpg"));
+    imageProcessStack.AddProcess(new RegionGrow(true));
+    // imageProcessStack.AddProcess(new CurveGrading(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
     // imageProcessStack.AddProcess(new Equalize(true));
@@ -2711,15 +3025,12 @@ void ImageLab::Process()
 
 void ImageLab::RenderGUI() {
     shouldProcess=false;
-    ImGui::ShowDemoWindow();
+    
+    ImGui::SetNextWindowPos(ImVec2(0,0));
+    ImGui::SetNextWindowSize(ImVec2(300, windowHeight));
     ImGui::Begin("Processes : ", nullptr, ImGuiWindowFlags_NoMove); 
 
-    // ImGui::SameLine(); 
-    // if(ImGui::Button("+"))
-    // {
-
-    // }
-
+    
     shouldProcess |= imageProcessStack.RenderGUI();
     ImGui::End();    
 

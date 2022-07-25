@@ -8,17 +8,34 @@ layout ( local_size_x = 32 , local_size_y = 32) in;
 
 uniform vec3 lowerBound;
 uniform vec3 upperBound;
+uniform int global;
 void main()
 {
     ivec2 pixelCoord = ivec2 ( gl_GlobalInvocationID.xy );
     vec3 color = imageLoad(textureIn, pixelCoord).rgb;
-    if(color.r < lowerBound.r) color.r = 0;
-    if(color.g < lowerBound.g) color.g = 0;
-    if(color.b < lowerBound.b) color.b = 0;
     
-    if(color.r > upperBound.r) color.r = 0;
-    if(color.g > upperBound.g) color.g = 0;
-    if(color.b > upperBound.b) color.b = 0;
+    if(global>0)
+    {
+        float grayScale = (color.r + color.g + color.b) * 0.333333f;
+        if(grayScale < lowerBound.r)
+        {
+            color = vec3(0,0,0);
+        }
+        if(grayScale > upperBound.r)
+        {
+            color = vec3(0,0,0);
+        }
+    }
+    else
+    {
+        if(color.r < lowerBound.r) color.r = 0;
+        if(color.g < lowerBound.g) color.g = 0;
+        if(color.b < lowerBound.b) color.b = 0;
+        
+        if(color.r > upperBound.r) color.r = 0;
+        if(color.g > upperBound.g) color.g = 0;
+        if(color.b > upperBound.b) color.b = 0;
+    }
 
     imageStore ( textureOut , pixelCoord , vec4(color, 0));
 }
