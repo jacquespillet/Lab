@@ -519,6 +519,8 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("OtsuThreshold")) AddProcess(new OtsuThreshold(true));
         if(ImGui::Button("LocalThreshold")) AddProcess(new LocalThreshold(true));
         if(ImGui::Button("RegionGrow")) AddProcess(new RegionGrow(true));
+        if(ImGui::Button("KMeansCluster")) AddProcess(new KMeansCluster(true));
+        if(ImGui::Button("SuperPixelsCluster")) AddProcess(new SuperPixelsCluster(true));
 
         ImGui::EndPopup();
     }
@@ -2156,6 +2158,348 @@ void RegionGrow::Process(GLuint textureIn, GLuint textureOut, int width, int hei
 
 //
 //------------------------------------------------------------------------
+KMeansCluster::KMeansCluster(bool enabled) : ImageProcess("KMeansCluster", "", enabled)
+{
+}
+
+void KMeansCluster::Unload()
+{
+    glDeleteProgram(shader);
+}
+
+void KMeansCluster::SetUniforms()
+{
+}
+
+bool KMeansCluster::RenderGui()
+{
+    bool changed=false;
+    
+    if(ImGui::Button("Process")) shouldProcess=true;
+    changed |= ImGui::DragInt("Num Clusters", &numClusters);
+    changed |= ImGui::Combo("OutputMode", (int*)&outputMode, "Random Color\0Cluster Color\0GrayScale\0\0");
+
+    changed |= shouldProcess;
+    return changed;
+}
+
+
+void KMeansCluster::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    inputData.resize(width * height);
+    glBindTexture(GL_TEXTURE_2D, textureIn);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+    
+    if(shouldProcess)
+    {
+        //Initialize the clusters with random positions
+        clusterPositions.resize(numClusters);
+        for(int i=0; i<numClusters; i++)
+        {
+            clusterPositions[i] = glm::vec3(
+                (float)rand() / (float)RAND_MAX,
+                (float)rand() / (float)RAND_MAX,
+                (float)rand() / (float)RAND_MAX
+            );
+        }
+
+        clusterMapping.resize(numClusters);
+        float totalDiff=100000;
+        while(totalDiff > 0.1f)
+        {
+            //Clear the mapping
+            for(int i=0; i<clusterMapping.size(); i++)
+            {
+                clusterMapping[i].clear();
+            }
+            
+            //Associate each pixel with one cluster
+            for(int i=0; i<inputData.size(); i++)
+            {
+                float closestDistance = 1e30f;
+                int closestCluster=0;
+                for(int j=0; j<numClusters; j++)
+                {
+                    glm::vec3 color = glm::vec3(inputData[i]);
+                    float distance = glm::distance2(color, clusterPositions[j]);
+                    
+                    if(distance < closestDistance)
+                    {
+                        closestDistance=distance;
+                        closestCluster=j;
+                    }
+                }
+                clusterMapping[closestCluster].push_back(i);
+            }
+
+            //calculate new cluster positions;
+            totalDiff = 0;
+            for(int i=0; i<numClusters; i++)
+            {
+                glm::vec3 average(0);
+                float inverseSize = 1.0f / (float)clusterMapping[i].size();
+                for(int j=0; j<clusterMapping[i].size(); j++)
+                {
+                    average += glm::vec3(inputData[clusterMapping[i][j]]) * inverseSize;
+                }
+
+                float  diff = glm::distance2(clusterPositions[i], average);
+                totalDiff += diff;
+                clusterPositions[i] = average;
+            }
+        }
+
+        for(int i=0; i<clusterMapping.size(); i++)
+        {
+            glm::vec3 clusterColor(0);
+            if(outputMode==OutputMode::ClusterColor)
+                clusterColor = clusterPositions[i];
+            else if(outputMode==OutputMode::GrayScale)
+            {
+                float value = (float)i / (float)numClusters;
+                clusterColor = glm::vec3(value);
+            }
+            else if(outputMode==OutputMode::RandomColor)
+            {
+                clusterColor = glm::vec3(
+                    (float)rand() / (float)RAND_MAX,
+                    (float)rand() / (float)RAND_MAX,
+                    (float)rand() / (float)RAND_MAX
+                );
+            }
+            for(int j=0; j<clusterMapping[i].size(); j++)
+            {
+                // inputData[clusterMapping[i][j]] = glm::vec4(value, value, value, 1);
+                inputData[clusterMapping[i][j]] = glm::vec4(clusterColor, 1);
+            }
+        }
+
+        shouldProcess=false;
+    }
+
+
+    glBindTexture(GL_TEXTURE_2D, textureOut);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+//
+//
+
+//
+//------------------------------------------------------------------------
+SuperPixelsCluster::SuperPixelsCluster(bool enabled) : ImageProcess("SuperPixelsCluster", "", enabled)
+{
+}
+
+void SuperPixelsCluster::Unload()
+{
+    glDeleteProgram(shader);
+}
+
+void SuperPixelsCluster::SetUniforms()
+{
+}
+
+bool SuperPixelsCluster::RenderGui()
+{
+    bool changed=false;
+    
+    if(ImGui::Button("Process")) shouldProcess=true;
+    changed |= ImGui::DragInt("Num Clusters", &numClusters);
+    changed |= ImGui::DragFloat("C", &C, 0.001f, 0.1f, 1000);
+    
+    changed |= ImGui::Combo("OutputMode", (int*)&outputMode, "Random Color\0Cluster Color\0GrayScale\0\0");
+    
+    changed |= shouldProcess;
+    return changed;
+}
+
+
+void SuperPixelsCluster::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    inputData.resize(width * height);
+    glBindTexture(GL_TEXTURE_2D, textureIn);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    clusterPositions.clear();
+    if(shouldProcess)
+    {
+        float totalColorDiff=1000;
+        float totalPositionDiff=1000;
+
+        //Assign initial positions
+        int numPerRow = (int)sqrt(numClusters);
+        glm::ivec2 clusterSize(width / numPerRow, height / numPerRow);
+        glm::ivec2 clusterHalfSize = clusterSize / 2;
+        int clusterDiagSize = (int)sqrt(clusterSize.x * clusterSize.x + clusterSize.y * clusterSize.y);
+        for(int y=0; y<numPerRow; y++)
+        {
+            for(int x=0; x<numPerRow; x++)
+            {
+                glm::vec2 jitter(
+                    (float)rand() / (float)RAND_MAX - 0.5f,
+                    (float)rand() / (float)RAND_MAX - 0.5f
+                );
+                jitter *= clusterHalfSize;
+                
+                glm::vec2 clusterPosition = glm::vec2(
+                    x * clusterSize.x + clusterHalfSize.x,
+                    y * clusterSize.y + clusterHalfSize.y
+                    ) + jitter;
+                glm::vec3 clusterColor = glm::vec3(inputData[(int)clusterPosition.y * width + (int)clusterPosition.x]);
+                clusterPositions.push_back(
+                    {
+                        clusterColor,
+                        clusterPosition
+                    }
+                );
+            }
+        }
+
+        while(totalColorDiff > 0.1f)
+        {
+
+
+            //Clear mapping
+            clusterMapping.resize(clusterPositions.size());
+            for(int i=0; i<clusterMapping.size(); i++)
+            {
+                clusterMapping[i].clear();
+            }
+
+            //Assign clusters
+            for(int y=0; y<height; y++)
+            {
+                for(int x=0; x<width; x++)
+                {
+                    glm::vec2 normalizedCoord(
+                        (float)x / (float)width,
+                        (float)y / (float)height
+                    );
+
+                    float minDistance = 1e30f;
+                    int clusterInx=0;
+
+                    int inx=  y * width +x;
+                    glm::vec3 pixelColor = inputData[inx];
+                    glm::vec2 pixelPosition(x, y);
+
+                    glm::ivec2 pixelClusterCoord = glm::ivec2(normalizedCoord.x * numPerRow, normalizedCoord.y * numPerRow);
+                    for(int cy=-1; cy<=1; cy++)
+                    {
+                        for(int cx=-1; cx<=1; cx++)
+                        {
+                            glm::ivec2 clusterCoord = pixelClusterCoord + glm::ivec2(cx, cy);
+                            int i = clusterCoord.y * numPerRow + clusterCoord.x;
+                            if(i <0 || i >= clusterPositions.size())continue;
+
+                            glm::vec2 clusterPosition = clusterPositions[i].position;
+                            float positionDistance = glm::distance(clusterPosition, pixelPosition);
+                            if(positionDistance < clusterDiagSize)
+                            {
+                                positionDistance /= (float)clusterDiagSize;
+
+                                glm::vec3 clusterColor = clusterPositions[i].color;
+                                float colorDistance = glm::distance(clusterColor, pixelColor) / C;
+                                
+                                //Calculate spatial distance
+                                float distance = sqrt(positionDistance * positionDistance + colorDistance * colorDistance);
+
+                                if(distance < minDistance)
+                                {
+                                    minDistance=distance;
+                                    clusterInx=i;
+                                }
+                            }
+                        
+                        }
+                    }
+
+                    clusterMapping[clusterInx].push_back(inx);
+                }
+            }
+
+            totalColorDiff=0;
+            for(int j=0; j<clusterMapping.size(); j++)
+            {
+                ClusterData average = {
+                    glm::vec3(0), glm::vec2(0)
+                };
+                float inverseSize = 1.0f / (float)clusterMapping[j].size();
+                for(int i=0; i<clusterMapping[j].size(); i++)
+                {
+                    int inx = clusterMapping[j][i];
+                    glm::vec2 position(
+                        inx % width,
+                        inx / width
+                    );
+                    glm::vec3 color = inputData[inx];
+
+                    average.color += color * inverseSize;
+                    average.position += position * inverseSize;
+                }
+
+                float colorDiff = glm::distance2(clusterPositions[j].color, average.color);
+                totalColorDiff += colorDiff;
+                float positionDiff = glm::distance2(clusterPositions[j].position, average.position) / (float)clusterDiagSize;
+                totalPositionDiff += positionDiff;
+
+                clusterPositions[j] = average;
+            }
+        }
+        
+        for(int j=0; j<clusterMapping.size(); j++)
+        {
+            ClusterData clusterPos = clusterPositions[j];
+            
+            glm::vec3 clusterColor(0);
+            if(outputMode == OutputMode::ClusterColor)
+            {
+                clusterColor = clusterPos.color;
+            }
+            else if(outputMode == OutputMode::RandomColor)
+            {
+             clusterColor = glm::vec3(
+                    (float)rand() / (float)RAND_MAX,
+                    (float)rand() / (float)RAND_MAX,
+                    (float)rand() / (float)RAND_MAX
+                );
+            }
+            else if(outputMode == OutputMode::GrayScale)
+            {
+                float grayScale = (float)j / (float)numClusters;
+                clusterColor = glm::vec3(grayScale);
+            }
+            for(int i=0; i<clusterMapping[j].size(); i++)
+            {
+                inputData[clusterMapping[j][i]] = glm::vec4(clusterColor,1);
+            }
+        }
+
+		shouldProcess = false;
+    }
+
+
+
+    glBindTexture(GL_TEXTURE_2D, textureOut);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+//
+//
+
+//
+//------------------------------------------------------------------------
 HoughTransform::HoughTransform(bool enabled) : ImageProcess("HoughTransform", "", enabled)
 {
     cannyEdgeDetector = new CannyEdgeDetector(true);
@@ -3008,9 +3352,9 @@ void ImageLab::Load() {
 
     imageProcessStack.Resize(width, height);
     // imageProcessStack.AddProcess(new ColorDistance(true));
-    // imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.PNG"));
-    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Apple.jpg"));
-    imageProcessStack.AddProcess(new RegionGrow(true));
+    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.PNG"));
+    // imageProcessStack.AddProcess(new AddImage(true, "resources/peppers.png"));
+    imageProcessStack.AddProcess(new KMeansCluster(true));
     // imageProcessStack.AddProcess(new CurveGrading(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));

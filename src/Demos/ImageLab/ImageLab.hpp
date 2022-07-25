@@ -447,6 +447,65 @@ struct RegionGrow : public ImageProcess
     
 };
 
+struct KMeansCluster : public ImageProcess
+{
+    KMeansCluster(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+    void Unload() override;
+
+    std::vector<glm::vec4> inputData;
+    std::vector<glm::vec3> clusterPositions;
+    std::vector<std::vector<int>> clusterMapping;
+
+
+    enum class OutputMode
+    {
+        RandomColor=0,
+        ClusterColor=1,
+        GrayScale=2
+    }; 
+
+    OutputMode outputMode = OutputMode::ClusterColor;
+
+    bool shouldProcess=true;
+
+    int numClusters=4;    
+};
+
+struct SuperPixelsCluster : public ImageProcess
+{
+    SuperPixelsCluster(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+    void Unload() override;
+
+    struct ClusterData
+    {
+        glm::vec3 color;
+        glm::vec2 position;
+    };
+
+    std::vector<glm::vec4> inputData;
+    std::vector<ClusterData> clusterPositions;
+    std::vector<std::vector<int>> clusterMapping;
+
+    bool shouldProcess=true;
+    float C = 0.1f;
+    int numClusters=500;
+
+    enum class OutputMode
+    {
+        RandomColor=0,
+        ClusterColor=1,
+        GrayScale=2
+    }; 
+
+    OutputMode outputMode = OutputMode::ClusterColor;
+};
+
 struct HoughTransform : public ImageProcess
 {
     HoughTransform(bool enabled=true);
