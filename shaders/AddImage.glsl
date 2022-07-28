@@ -18,7 +18,6 @@ void main()
         
         vec3 textureColor = multiplier * imageLoad(textureToAdd, pixelCoord).rgb;
         color += textureColor;
-        // color = 1 - color;
-        imageStore ( textureOut , pixelCoord + offset , vec4(color, 0));
+        imageStore ( textureOut , pixelCoord + offset, vec4(color, 1));
     }
 }

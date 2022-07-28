@@ -143,6 +143,7 @@ struct Threshold : public ImageProcess
     bool global=false;
     float globalLower = 0;
     float globalUpper = 1;
+    bool binary=false;
     glm::vec3 lower = glm::vec3(0);
     glm::vec3 upper = glm::vec3(1);
 };
@@ -241,6 +242,62 @@ struct GaussianBlur : public ImageProcess
     std::vector<float> kernel;
     GLuint kernelBuffer;
 
+    bool shouldRecalculateKernel=true;
+};
+
+struct Erosion : public ImageProcess
+{
+    Erosion(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    void RecalculateKernel();
+    int size=3;
+    int subSize=1;
+    int maxSize = 256;
+    std::vector<float> kernel;
+    
+    enum class StructuringElementShape
+    {
+        Circle = 0,
+        Diamond = 1,
+        Line = 2,
+        Octagon = 3,
+        Square = 5
+    };
+    StructuringElementShape shape = StructuringElementShape::Circle;
+
+    float rotation=0;
+
+    GLuint kernelBuffer;
+    bool shouldRecalculateKernel=true;
+};
+
+struct Dilation : public ImageProcess
+{
+    Dilation(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    void RecalculateKernel();
+    int size=3;
+    int subSize=1;
+    int maxSize = 256;
+    std::vector<float> kernel;
+    
+    enum class StructuringElementShape
+    {
+        Circle = 0,
+        Diamond = 1,
+        Line = 2,
+        Octagon = 3,
+        Square = 5
+    };
+    StructuringElementShape shape = StructuringElementShape::Circle;
+
+    float rotation=0;
+
+    GLuint kernelBuffer;
     bool shouldRecalculateKernel=true;
 };
 
@@ -443,8 +500,26 @@ struct RegionGrow : public ImageProcess
         Mask,
         Isolate
     };
-    OutputType outputType;
-    
+    OutputType outputType; 
+};
+
+struct RegionProperties : public ImageProcess
+{
+    RegionProperties(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+    void Unload() override;
+
+    struct Region
+    {
+        glm::uvec2 center;
+        std::vector<glm::ivec2> points;
+    };
+    std::vector<Region> regions;
+
+    std::vector<glm::vec4> inputData;
+    bool shouldProcess=true;
 };
 
 struct KMeansCluster : public ImageProcess

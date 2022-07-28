@@ -521,6 +521,8 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("RegionGrow")) AddProcess(new RegionGrow(true));
         if(ImGui::Button("KMeansCluster")) AddProcess(new KMeansCluster(true));
         if(ImGui::Button("SuperPixelsCluster")) AddProcess(new SuperPixelsCluster(true));
+        if(ImGui::Button("Erosion")) AddProcess(new Erosion(true));
+        if(ImGui::Button("Dilation")) AddProcess(new Dilation(true));
 
         ImGui::EndPopup();
     }
@@ -772,14 +774,6 @@ void Equalize::SetUniforms()
 
 void Equalize::Process(GLuint textureIn, GLuint textureOut, int width, int height)
 {
-    // for(int i=0; i<histogramGray.size(); i++)
-    // {
-    //     pr[i] = histogramGray[i] / (float)(texture->width * texture->height);
-    // }
-    // for(int i=1; i<histogramGray.size(); i++)
-    // {
-    //     s[i] = (int)std::round(255.0f * pr[i]) + s[i-1];
-    // }
     
     //Reset histogram
     {
@@ -964,6 +958,7 @@ Threshold::Threshold(bool enabled) : ImageProcess("Threshold", "shaders/Threshol
 void Threshold::SetUniforms()
 {
     glUniform1i(glGetUniformLocation(shader, "global"), (int)global);
+    glUniform1i(glGetUniformLocation(shader, "binary"), (int)binary);
     if(global)
     {
         glUniform3f(glGetUniformLocation(shader, "lowerBound"), globalLower, globalLower, globalLower);
@@ -979,7 +974,8 @@ void Threshold::SetUniforms()
 bool Threshold::RenderGui()
 {
     bool changed=false;
-    ImGui::Checkbox("Global", &global);
+    changed |= ImGui::Checkbox("Binary", &binary);
+    changed |= ImGui::Checkbox("Global", &global);
     if(global)
     {
         changed |= ImGui::SliderFloat("Lower bound", &globalLower, 0, 1);
@@ -1295,6 +1291,300 @@ bool GaussianBlur::RenderGui()
 }
 
 void GaussianBlur::Unload()
+{
+    glDeleteBuffers(1, &kernelBuffer);
+}
+//
+
+//
+//------------------------------------------------------------------------
+Erosion::Erosion(bool enabled) : ImageProcess("Erosion", "shaders/Erosion.glsl", enabled)
+{
+    kernel.resize(maxSize * maxSize);
+    glGenBuffers(1, (GLuint*)&kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+}
+
+void Erosion::RecalculateKernel()
+{
+    int offset = (size - subSize) / 2;
+    float halfSize = (size-1)/2.0f;
+    // normalising the Kernel
+    std::fill(kernel.begin(), kernel.begin() + size*size, 0.0f);
+    if(shape==StructuringElementShape::Circle)
+    {
+        for (int i = 0; i < size; ++i)
+        {
+            for (int j = 0; j < size; ++j)
+            {
+                glm::vec2 coord((float)i - halfSize, (float)j-halfSize);
+                float length = glm::length(coord);
+                int flatInx = (i) * size + (j);
+                if(length <= halfSize)
+                {
+                    kernel[flatInx] = 1;
+                }
+            }
+        }
+    }
+    else if(shape == StructuringElementShape::Diamond)
+    {
+        glm::mat3 transform(1);
+        float cosTheta = cos(glm::radians(45.0f));
+        float sinTheta = sin(glm::radians(45.0f));
+        glm::mat3 rotationMatrix(1);
+        rotationMatrix[0][0] = cosTheta;
+        rotationMatrix[1][0] = -sinTheta;
+        rotationMatrix[0][1] = sinTheta;
+        rotationMatrix[1][1] = cosTheta;
+
+        for (int i = 0; i < size; ++i)
+        {
+            for (int j = 0; j < size; ++j)
+            {
+                glm::vec2 coord((float)i - halfSize, (float)j-halfSize);
+                coord = rotationMatrix * glm::vec3(coord, 1);
+                coord += halfSize;
+                int flatInx = ((int)coord.x) * size + ((int)coord.y);
+                kernel[flatInx] = 1;
+            }
+        }        
+    }
+    else if(shape == StructuringElementShape::Line)
+    {
+        glm::mat3 transform(1);
+        float cosTheta = cos(glm::radians(rotation));
+        float sinTheta = sin(glm::radians(rotation));
+        glm::mat3 rotationMatrix(1);
+        rotationMatrix[0][0] = cosTheta;
+        rotationMatrix[1][0] = -sinTheta;
+        rotationMatrix[0][1] = sinTheta;
+        rotationMatrix[1][1] = cosTheta;
+
+        for(int i=0; i<size; i++)
+        {
+            glm::vec2 coord((float)i - halfSize, 0);
+            coord = rotationMatrix * glm::vec3(coord, 1);
+            coord += halfSize;
+            int flatInx = ((int)coord.x) * size + ((int)coord.y);
+            kernel[flatInx] = 1;            
+        }
+    }
+    else if(shape == StructuringElementShape::Square)
+    {
+        for(int i=0; i<subSize; i++)
+        {
+            for(int j=0; j<subSize; j++)
+            {
+                glm::ivec2 coord = glm::ivec2(i, j) + glm::ivec2(offset);
+                int flatInx = ((int)coord.x) * size + ((int)coord.y);
+                kernel[flatInx] = 1;            
+            }
+        }
+    }
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, size * size * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    shouldRecalculateKernel=false;
+}
+
+void Erosion::SetUniforms()
+{
+    if(shouldRecalculateKernel) RecalculateKernel();
+
+    glUniform1i(glGetUniformLocation(shader, "size"), size);
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+}
+
+bool Erosion::RenderGui()
+{
+    bool changed=false;
+    shouldRecalculateKernel |= ImGui::DragInt("Size", &size, 2, 1, maxSize);
+    
+    shouldRecalculateKernel |= ImGui::Combo("Shape", (int*)&shape, "Circle\0Diamond\0Line\0Octagon\0Square\0\0");
+
+    if(shape == StructuringElementShape::Line)
+    {
+        shouldRecalculateKernel |= ImGui::SliderFloat("Rotation", &rotation, -180, 180);
+    }
+    if(shape == StructuringElementShape::Square)
+    {
+        shouldRecalculateKernel |= ImGui::DragInt("Square Size", &subSize, 1, 1, size);
+    }
+
+    for(int i=0; i<size; i++)
+    {
+        for(int j=0; j<size; j++)
+        {
+            int flatInx = (i) * size + (j);
+            ImGui::PushID(flatInx);
+            ImGui::SetNextItemWidth(20);
+            ImGui::DragFloat("", &kernel[flatInx]);
+            ImGui::PopID();
+            if(j < size-1) ImGui::SameLine();
+        }
+    }
+    
+
+    changed |= shouldRecalculateKernel;
+    return changed;
+}
+
+void Erosion::Unload()
+{
+    glDeleteBuffers(1, &kernelBuffer);
+}
+//
+
+//
+//------------------------------------------------------------------------
+Dilation::Dilation(bool enabled) : ImageProcess("Dilation", "shaders/Dilation.glsl", enabled)
+{
+    kernel.resize(maxSize * maxSize);
+    glGenBuffers(1, (GLuint*)&kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, kernel.size() * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+}
+
+void Dilation::RecalculateKernel()
+{
+    int offset = (size - subSize) / 2;
+    float halfSize = (size-1)/2.0f;
+    // normalising the Kernel
+    std::fill(kernel.begin(), kernel.begin() + size*size, 0.0f);
+    if(shape==StructuringElementShape::Circle)
+    {
+        for (int i = 0; i < size; ++i)
+        {
+            for (int j = 0; j < size; ++j)
+            {
+                glm::vec2 coord((float)i - halfSize, (float)j-halfSize);
+                float length = glm::length(coord);
+                int flatInx = (i) * size + (j);
+                if(length <= halfSize)
+                {
+                    kernel[flatInx] = 1;
+                }
+            }
+        }
+    }
+    else if(shape == StructuringElementShape::Diamond)
+    {
+        glm::mat3 transform(1);
+        float cosTheta = cos(glm::radians(45.0f));
+        float sinTheta = sin(glm::radians(45.0f));
+        glm::mat3 rotationMatrix(1);
+        rotationMatrix[0][0] = cosTheta;
+        rotationMatrix[1][0] = -sinTheta;
+        rotationMatrix[0][1] = sinTheta;
+        rotationMatrix[1][1] = cosTheta;
+
+        for (int i = 0; i < size; ++i)
+        {
+            for (int j = 0; j < size; ++j)
+            {
+                glm::vec2 coord((float)i - halfSize, (float)j-halfSize);
+                coord = rotationMatrix * glm::vec3(coord, 1);
+                coord += halfSize;
+                int flatInx = ((int)coord.x) * size + ((int)coord.y);
+                kernel[flatInx] = 1;
+            }
+        }        
+    }
+    else if(shape == StructuringElementShape::Line)
+    {
+        glm::mat3 transform(1);
+        float cosTheta = cos(glm::radians(rotation));
+        float sinTheta = sin(glm::radians(rotation));
+        glm::mat3 rotationMatrix(1);
+        rotationMatrix[0][0] = cosTheta;
+        rotationMatrix[1][0] = -sinTheta;
+        rotationMatrix[0][1] = sinTheta;
+        rotationMatrix[1][1] = cosTheta;
+
+        for(int i=0; i<size; i++)
+        {
+            glm::vec2 coord((float)i - halfSize, 0);
+            coord = rotationMatrix * glm::vec3(coord, 1);
+            coord += halfSize;
+            int flatInx = ((int)coord.x) * size + ((int)coord.y);
+            kernel[flatInx] = 1;            
+        }
+    }
+    else if(shape == StructuringElementShape::Square)
+    {
+        for(int i=0; i<subSize; i++)
+        {
+            for(int j=0; j<subSize; j++)
+            {
+                glm::ivec2 coord = glm::ivec2(i, j) + glm::ivec2(offset);
+                int flatInx = ((int)coord.x) * size + ((int)coord.y);
+                kernel[flatInx] = 1;            
+            }
+        }
+    }
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, size * size * sizeof(float), kernel.data(), GL_DYNAMIC_COPY); 
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    shouldRecalculateKernel=false;
+}
+
+void Dilation::SetUniforms()
+{
+    if(shouldRecalculateKernel) RecalculateKernel();
+
+    glUniform1i(glGetUniformLocation(shader, "size"), size);
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, kernelBuffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, kernelBuffer);
+}
+
+bool Dilation::RenderGui()
+{
+    bool changed=false;
+    shouldRecalculateKernel |= ImGui::DragInt("Size", &size, 2, 1, maxSize);
+    
+    shouldRecalculateKernel |= ImGui::Combo("Shape", (int*)&shape, "Circle\0Diamond\0Line\0Octagon\0Square\0\0");
+
+    if(shape == StructuringElementShape::Line)
+    {
+        shouldRecalculateKernel |= ImGui::SliderFloat("Rotation", &rotation, -180, 180);
+    }
+    if(shape == StructuringElementShape::Square)
+    {
+        shouldRecalculateKernel |= ImGui::DragInt("Square Size", &subSize, 1, 1, size);
+    }
+
+    for(int i=0; i<size; i++)
+    {
+        for(int j=0; j<size; j++)
+        {
+            int flatInx = (i) * size + (j);
+            ImGui::PushID(flatInx);
+            ImGui::SetNextItemWidth(20);
+            ImGui::DragFloat("", &kernel[flatInx]);
+            ImGui::PopID();
+            if(j < size-1) ImGui::SameLine();
+        }
+    }
+    
+
+    changed |= shouldRecalculateKernel;
+    return changed;
+}
+
+void Dilation::Unload()
 {
     glDeleteBuffers(1, &kernelBuffer);
 }
@@ -2277,6 +2567,123 @@ void KMeansCluster::Process(GLuint textureIn, GLuint textureOut, int width, int 
                 // inputData[clusterMapping[i][j]] = glm::vec4(value, value, value, 1);
                 inputData[clusterMapping[i][j]] = glm::vec4(clusterColor, 1);
             }
+        }
+
+        shouldProcess=false;
+    }
+
+
+    glBindTexture(GL_TEXTURE_2D, textureOut);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+//
+//
+
+//
+//------------------------------------------------------------------------
+RegionProperties::RegionProperties(bool enabled) : ImageProcess("RegionProperties", "", enabled)
+{
+}
+
+void RegionProperties::Unload()
+{
+    glDeleteProgram(shader);
+}
+
+void RegionProperties::SetUniforms()
+{
+}
+
+bool RegionProperties::RenderGui()
+{
+    bool changed=false;
+    
+    if(ImGui::Button("Process")) shouldProcess=true;
+    changed |= shouldProcess;
+    return changed;
+}
+
+
+void RegionProperties::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    inputData.resize(width * height);
+    glBindTexture(GL_TEXTURE_2D, textureIn);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+    
+    std::vector<bool> pixelProcessed(width*height, false);
+    if(shouldProcess)
+    {
+		regions.clear();
+        glm::ivec2 currentPixel;
+        for(currentPixel.y=0; currentPixel.y<height; currentPixel.y++)
+        {
+            for(currentPixel.x=0; currentPixel.x<width; currentPixel.x++)
+            {
+                int inx = currentPixel.y * width + currentPixel.x;
+                if(inputData[inx].r >0 && !pixelProcessed[inx]) //Found a white pixel, and we haven't processed it yet
+                {
+                    Region region = {};
+
+                    //Find all the points inside the current region
+                    std::stack<glm::ivec2> pointsToExplore;
+                    pointsToExplore.push(currentPixel);
+                    while(pointsToExplore.size() !=0)
+                    {
+                        glm::ivec2 currentPoint = pointsToExplore.top();
+                        pointsToExplore.pop();
+                        for(int y=-1; y<=1; y++)
+                        {
+                            for(int x=-1; x<=1; x++)
+                            {
+                                glm::ivec2 coord = currentPoint + glm::ivec2(x, y);
+                                if (coord.x >= 0 && coord.x < width && coord.y >= 0 && coord.y < height)
+                                {
+                                    if(inputData[coord.y * width + coord.x].r >0 && !pixelProcessed[coord.y * width + coord.x])
+                                    {
+                                        pointsToExplore.push(coord);
+                                        pixelProcessed[coord.y * width + coord.x]=true;
+                                        region.points.push_back(coord);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    regions.push_back(region);
+                }
+            }
+        }
+
+        for(int i=0; i<regions.size(); i++)
+        {   
+            glm::vec3 regionColor(
+                (float)rand() / (float)RAND_MAX,
+                (float)rand() / (float)RAND_MAX,
+                (float)rand() / (float)RAND_MAX
+            );
+            for(int j=0; j<regions[i].points.size(); j++)
+            {
+                //Calculate its center of mass
+                regions[i].center += glm::uvec2(regions[i].points[j]);
+                glm::ivec2 p = regions[i].points[j];
+                inputData[p.y * width + p.x] = glm::vec4(
+                    regionColor,1
+                );
+            }
+
+            regions[i].center /= regions[i].points.size();
+
+            //Draw center
+            glm::ivec2 center = regions[i].center;
+            inputData[center.y * width + center.x] = glm::vec4(
+                1,1,1,1
+            );
+
         }
 
         shouldProcess=false;
@@ -3352,9 +3759,12 @@ void ImageLab::Load() {
 
     imageProcessStack.Resize(width, height);
     // imageProcessStack.AddProcess(new ColorDistance(true));
-    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.PNG"));
+    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Circles.PNG"));
+    imageProcessStack.AddProcess(new RegionProperties(true));
+    // imageProcessStack.AddProcess(new RegionProperties(true));
     // imageProcessStack.AddProcess(new AddImage(true, "resources/peppers.png"));
-    imageProcessStack.AddProcess(new KMeansCluster(true));
+    // imageProcessStack.AddProcess(new Threshold(true));
+    // imageProcessStack.AddProcess(new SmoothingFilter(true));
     // imageProcessStack.AddProcess(new CurveGrading(true));
     // imageProcessStack.AddProcess(new AddNoise(true));
     // imageProcessStack.AddProcess(new MinMaxFilter(true));
@@ -3369,20 +3779,25 @@ void ImageLab::Process()
 
 void ImageLab::RenderGUI() {
     shouldProcess=false;
-    
-    ImGui::SetNextWindowPos(ImVec2(0,0));
-    ImGui::SetNextWindowSize(ImVec2(300, windowHeight));
-    ImGui::Begin("Processes : ", nullptr, ImGuiWindowFlags_NoMove); 
+        
 
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::SetNextWindowViewport(viewport->ID);
+    window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
     
+    ImGui::Begin("ImageLab", nullptr, window_flags);
+    ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
+    ImGuiID dockspace_id = ImGui::GetID("ImageLabDockSpace");
+    ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
+    
+    ImGui::Begin("Processes : "); 
     shouldProcess |= imageProcessStack.RenderGUI();
     ImGui::End();    
 
-
-}
-
-void ImageLab::Render() {
-    
     if(shouldProcess || firstFrame)
     {
         std::cout << "PROCESSING "<< std::endl;
@@ -3390,12 +3805,25 @@ void ImageLab::Render() {
         shouldProcess=false;
     }
 
-    glUseProgram(MeshShader.programShaderObject);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, outTexture);
-    glUniform1i(glGetUniformLocation(MeshShader.programShaderObject, "textureImage"), 0);
 
-    Quad->RenderShader(MeshShader.programShaderObject);
+    ImGui::Begin("Output");
+    ImVec2 texSize((float)width, (float)height);
+    ImGui::Image((ImTextureID)outTexture, texSize);
+    ImGui::End();
+
+
+    // glUseProgram(MeshShader.programShaderObject);
+    // glActiveTexture(GL_TEXTURE0);
+    // glBindTexture(GL_TEXTURE_2D, outTexture);
+    // glUniform1i(glGetUniformLocation(MeshShader.programShaderObject, "textureImage"), 0);
+    // Quad->RenderShader(MeshShader.programShaderObject);
+
+    ImGui::End();    
+}
+
+void ImageLab::Render() {
+
+
 
     firstFrame=false;
 }

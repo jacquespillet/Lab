@@ -33,5 +33,5 @@ void main()
         }
     }
     color /= float(count);
-    imageStore ( textureOut , pixelCoord , vec4(color, 0));
+    imageStore ( textureOut , pixelCoord , vec4(color, 1));
 }

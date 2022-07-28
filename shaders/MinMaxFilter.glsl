@@ -34,5 +34,5 @@ void main()
             else color = max(sampleColor, color);
         }
     }
-    imageStore ( textureOut , pixelCoord , vec4(color, 0));
+    imageStore ( textureOut , pixelCoord , vec4(color, 1));
 }

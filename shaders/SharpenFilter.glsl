@@ -44,5 +44,5 @@ void main()
     }
     vec3 color = imageLoad(textureIn, pixelCoord).rgb + edgeColor;
             
-    imageStore ( textureOut , pixelCoord , vec4(color, 0));
+    imageStore ( textureOut , pixelCoord , vec4(color, 1));
 }

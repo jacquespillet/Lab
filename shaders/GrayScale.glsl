@@ -14,5 +14,5 @@ void main()
     vec3 grayScale = ((color.x + color.y + color.z) / 3.0f).xxx;
     vec3 finalColor = mix(grayScale, color.rgb, saturation);
 
-    imageStore ( textureOut , pixelCoord , vec4(finalColor, 0));
+    imageStore ( textureOut , pixelCoord , vec4(finalColor, 1));
 }

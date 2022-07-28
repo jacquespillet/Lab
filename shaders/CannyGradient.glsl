@@ -54,5 +54,5 @@ void main()
     
     vec3 color = vec3(magnitude, angle,0);
     
-    imageStore ( textureOut , pixelCoord , vec4(color, 0));
+    imageStore ( textureOut , pixelCoord , vec4(color, 1));
 }

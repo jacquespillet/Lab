@@ -21,5 +21,5 @@ void main()
     vec3 finalColor = imageLoad(textureIn, ivec2(x, y)).rgb;
 
     
-    imageStore ( textureOut , pixelCoord , vec4(finalColor, 0));
+    imageStore ( textureOut , pixelCoord , vec4(finalColor, 1));
 }

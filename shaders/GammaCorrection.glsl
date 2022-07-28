@@ -13,5 +13,5 @@ void main()
     ivec2 pixelCoord = ivec2 ( gl_GlobalInvocationID.xy );
     vec3 color = imageLoad(textureIn, pixelCoord).rgb;
     color = pow(color, vec3(1.0f/gamma));
-    imageStore ( textureOut , pixelCoord , vec4(color, 0));
+    imageStore ( textureOut , pixelCoord , vec4(color, 1));
 }

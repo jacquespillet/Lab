@@ -15,5 +15,5 @@ void main()
     float grayScale = ((color.x + color.y + color.z) / 3.0f);
     
     grayScale = (grayScale - lowerBound) / (upperBound - lowerBound);
-    imageStore ( textureOut , pixelCoord , vec4(grayScale.xxx, 0));
+    imageStore ( textureOut , pixelCoord , vec4(grayScale.xxx, 1));
 }

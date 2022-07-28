@@ -13,5 +13,5 @@ void main()
     vec3 pixelColor = imageLoad(textureIn, pixelCoord).rgb;
     pixelColor += color;
     // color = 1 - color;
-    imageStore ( textureOut , pixelCoord , vec4(pixelColor, 0));
+    imageStore ( textureOut , pixelCoord , vec4(pixelColor, 1));
 }

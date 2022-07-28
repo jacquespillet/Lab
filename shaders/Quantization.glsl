@@ -17,5 +17,5 @@ void main()
     ivec3 colorInt = ivec3(color * float(levels));
     vec3 finalColor = vec3(colorInt) / float(levels);
     
-    imageStore ( textureOut , pixelCoord , vec4(finalColor, 0));
+    imageStore ( textureOut , pixelCoord , vec4(finalColor, 1));
 }

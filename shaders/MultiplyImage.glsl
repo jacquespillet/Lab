@@ -18,5 +18,5 @@ void main()
     vec3 textureColor = multiplier * texture(textureToMultiply, uv).rgb;
     color *= textureColor;
     // color = 1 - color;
-    imageStore ( textureOut , pixelCoord , vec4(color, 0));
+    imageStore ( textureOut , pixelCoord , vec4(color, 1));
 }

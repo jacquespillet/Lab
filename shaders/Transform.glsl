@@ -31,7 +31,7 @@ void main()
     if(interpolation==0)
     {
         vec3 color = imageLoad(textureIn, ivec2(transformedCoord.xy)).rgb;
-        imageStore ( textureOut , outPixelcoord , vec4(color, 0));
+        imageStore ( textureOut , outPixelcoord , vec4(color, 1));
     }
     else
     {
@@ -50,6 +50,6 @@ void main()
         
         vec3 color = ((1.0f - beta) * p00 + beta * p01) * (1 - alpha) + 
                      ((1.0f - beta) * p10 + beta * p11) * (alpha); 
-        imageStore ( textureOut , outPixelcoord , vec4(color, 0));
+        imageStore ( textureOut , outPixelcoord , vec4(color, 1));
     }
 }

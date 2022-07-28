@@ -48,5 +48,5 @@ void main()
     sort(c5, c6, c2, c7, c8);
     
     vec3 color = c2.rgb;
-    imageStore ( textureOut , pixelCoord , vec4(color, 0));
+    imageStore ( textureOut , pixelCoord , vec4(color, 1));
 }

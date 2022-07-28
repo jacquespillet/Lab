@@ -28,5 +28,5 @@ void main()
     color.g = greenLut[colorInt.g];
     color.b = blueLut[colorInt.b];
 
-    imageStore ( textureOut , pixelCoord , vec4(color, 0));
+    imageStore ( textureOut , pixelCoord , vec4(color, 1));
 }

@@ -16,5 +16,5 @@ void main()
 
     if(distance(color, clipColor) > clipDistance)color=vec3(0);
     // color = 1 - color;
-    imageStore ( textureOut , pixelCoord , vec4(color, 0));
+    imageStore ( textureOut , pixelCoord , vec4(color, 1));
 }

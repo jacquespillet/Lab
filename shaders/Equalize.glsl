@@ -36,6 +36,6 @@ void main()
         int grayScaleInt = min(254, max(0, int(grayScaleFloat * 255.0f)));
         int lutResult = lut[grayScaleInt].a;
         float lutResultFloat = float(lutResult) / 255.0f;
-        imageStore ( textureOut , pixelCoord , vec4(lutResultFloat.xxx, 0));
+        imageStore ( textureOut , pixelCoord , vec4(lutResultFloat.xxx, 1));
     }
 }
