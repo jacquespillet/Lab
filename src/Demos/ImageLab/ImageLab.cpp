@@ -285,6 +285,11 @@ bool ImageProcess::RenderGui()
     return false;
 }
 
+bool ImageProcess::RenderOutputGui()
+{
+    return false;
+}
+
 void ImageProcess::Process(GLuint textureIn, GLuint textureOut, int width, int height)
 {
 	glUseProgram(shader);
@@ -351,7 +356,7 @@ ImageProcessStack::ImageProcessStack()
     CreateComputeShader("shaders/RenderHistogram.glsl", &renderHistogramShader);
     CreateComputeShader("shaders/ClearTexture.glsl", &clearTextureShader);
 
-
+    Resize(width, height);
 }
 
 void ImageProcessStack::AddProcess(ImageProcess* imageProcess)
@@ -536,15 +541,19 @@ bool ImageProcessStack::RenderGUI()
     {
         ImageProcess *item = imageProcesses[n];
         
-        ImGui::PushID(n);
+        ImGui::PushID(n * 2 + 0);
         changed |= ImGui::Checkbox("", &imageProcesses[n]->enabled);
         ImGui::PopID();
         ImGui::SameLine();
         bool isSelected=false;
+        
+        
+        ImGui::PushID(n * 2 + 1);
         if(ImGui::Selectable(item->name.c_str(), &isSelected))
         {
             selectedImageProcess = item;
         }
+        ImGui::PopID();
 
         if (ImGui::IsItemActive() && !ImGui::IsItemHovered())
         {
@@ -1645,6 +1654,12 @@ bool AddImage::RenderGui()
 		filenameChanged = false;
     }
 
+    if(ImGui::Button("Set Resolution from this image"))
+    {
+        imageProcessStack->Resize(texture.width, texture.height);
+        changed=true;
+    }
+
     return changed;
 }
 
@@ -2601,8 +2616,103 @@ bool RegionProperties::RenderGui()
     
     if(ImGui::Button("Process")) shouldProcess=true;
     changed |= shouldProcess;
+
+    ImGui::Checkbox("Compute Skeleton", &calculateSkeleton);
+
+    if(ImGui::CollapsingHeader("Regions", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        for(int i=0; i<regions.size(); i++)
+        {
+            ImGui::PushID(i);
+            if(ImGui::TreeNodeEx("Region", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                ImGui::Checkbox("Display", &regions[i].renderGui);
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
+        }
+    }
     return changed;
 }
+
+bool RegionProperties::RenderOutputGui()
+{
+    bool changed=false;
+    // float width = ImGui::GetWindowContentRegionWidth();
+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    
+    glm::vec2 margin = imageProcessStack->outputGuiStart;
+    for(int i=0; i<regions.size(); i++)
+    {
+        if(regions[i].renderGui)
+        {
+            char regionName[80];
+            sprintf(regionName, "Region %d", i);
+            ImGui::Begin(regionName, nullptr, ImGuiWindowFlags_NoMove);
+            
+            ImVec2 pos = ImVec2((float)regions[i].center.x + margin.x, (float)regions[i].center.y + margin.y);
+            glm::vec2 size = regions[i].boundingBox.maxBB - regions[i].boundingBox.minBB;
+            
+            ImGui::SetWindowPos(ImVec2(pos.x, pos.y - size.y/2 -50));
+            
+            ImGui::PushID(i);
+            if(ImGui::CollapsingHeader("Info"))
+            {
+                ImGui::Text("Area : %f", regions[i].area);
+                ImGui::Text("Perimeter : %f", regions[i].perimeter);
+                ImGui::Text("Compactness : %f", regions[i].compactness);
+                ImGui::Text("circularity : %f", regions[i].circularity);
+                ImGui::Text("size : %fx%f", size.x, size.y);            
+            }
+            ImGui::PopID();
+
+            ImGui::Checkbox("Draw BB", &regions[i].drawBB);
+            if(regions[i].drawBB)
+            {
+                drawList->AddRect(
+                    ImVec2(regions[i].boundingBox.minBB.x + margin.x, regions[i].boundingBox.minBB.y + margin.y), 
+                    ImVec2(regions[i].boundingBox.maxBB.x + margin.x, regions[i].boundingBox.maxBB.y + margin.y), IM_COL32(0,0,255,255)
+                );
+            }
+            
+            ImGui::Checkbox("Draw Axes", &regions[i].DrawAxes);
+            if(regions[i].DrawAxes)
+            {
+                glm::vec2 axis1 = glm::normalize(regions[i].eigenVector1) * 2 * sqrt(regions[i].eigenValue1) ;
+                drawList->AddLine(
+                    ImVec2(pos),
+                    ImVec2(pos.x + axis1.x, pos.y + axis1.y),
+                    IM_COL32(255,0,0,255)
+                );
+                glm::vec2 axis2 = glm::normalize(regions[i].eigenVector2) * 2 * sqrt(regions[i].eigenValue2) ;
+                drawList->AddLine(
+                    ImVec2(pos),
+                    ImVec2(pos.x + axis2.x, pos.y + axis2.y),
+                    IM_COL32(0,255,0,255)
+                );
+            }
+            
+            ImGui::End();
+        }
+    }
+
+    return changed;
+}
+
+int RegionProperties::GetStartIndex(glm::ivec2 b, glm::ivec2 c)
+{
+    glm::ivec2 diff = c - b;
+    if(diff == glm::ivec2(-1, 0)) return 0; //0:Left 
+    if(diff == glm::ivec2(-1,-1)) return 1; //1:top left
+    if(diff == glm::ivec2( 0,-1)) return 2; //2:top
+    if(diff == glm::ivec2( 1,-1)) return 3; //3:top right
+    if(diff == glm::ivec2( 1, 0)) return 4; //4:right
+    if(diff == glm::ivec2( 1, 1)) return 5; //5:bottom right
+    if(diff == glm::ivec2( 0, 1)) return 6; //6:bottom
+    if(diff == glm::ivec2(-1, 1)) return 7; //7:bottom left
+    return 0;
+}
+
 
 
 void RegionProperties::Process(GLuint textureIn, GLuint textureOut, int width, int height)
@@ -2616,6 +2726,7 @@ void RegionProperties::Process(GLuint textureIn, GLuint textureOut, int width, i
                     inputData.data());
     glBindTexture(GL_TEXTURE_2D, 0);
     
+    //Find all the different regions
     std::vector<bool> pixelProcessed(width*height, false);
     if(shouldProcess)
     {
@@ -2659,31 +2770,188 @@ void RegionProperties::Process(GLuint textureIn, GLuint textureOut, int width, i
             }
         }
 
-        for(int i=0; i<regions.size(); i++)
+        
+        for(int j=0; j<regions.size(); j++)
         {   
-            glm::vec3 regionColor(
-                (float)rand() / (float)RAND_MAX,
-                (float)rand() / (float)RAND_MAX,
-                (float)rand() / (float)RAND_MAX
-            );
-            for(int j=0; j<regions[i].points.size(); j++)
+            //Calculate the region bounding box
+            regions[j].boundingBox.minBB = glm::ivec2(width, height);
+            regions[j].boundingBox.maxBB = glm::ivec2(0);
+            for(int i=0; i<regions[j].points.size(); i++)
             {
-                //Calculate its center of mass
-                regions[i].center += glm::uvec2(regions[i].points[j]);
-                glm::ivec2 p = regions[i].points[j];
-                inputData[p.y * width + p.x] = glm::vec4(
-                    regionColor,1
-                );
+                regions[j].boundingBox.minBB = glm::min(regions[j].points[i],regions[j].boundingBox.minBB);
+                regions[j].boundingBox.maxBB = glm::max(regions[j].points[i],regions[j].boundingBox.maxBB);
             }
 
-            regions[i].center /= regions[i].points.size();
+            std::vector<point> outlinePoints;
+            //Find the first point
+            bool shouldBreak = false;
+            for(int y=regions[j].boundingBox.minBB.y; y<regions[j].boundingBox.maxBB.y; y++)
+            {
+                for(int x=regions[j].boundingBox.minBB.x; x<regions[j].boundingBox.maxBB.x; x++)
+                {
+                    if(inputData[y * width + x].x != 0)
+                    {
+                        outlinePoints.push_back(
+                            {
+                                glm::ivec2(x, y),
+                                glm::ivec2(x-1, y)
+                            }
+                        );
+                        shouldBreak = true;
+                        break;
+                    }
+                }
+                if (shouldBreak)break;
+            }
+            
+            //Find the ordered list of points
+            point *currentPoint = &outlinePoints[outlinePoints.size()-1];
+            point firstPoint = *currentPoint;
+            do {
+                glm::ivec2 prevCoord;
+                int startInx = GetStartIndex(currentPoint->b, currentPoint->c);
+                
+                for(int i=startInx; i<startInx + directions.size(); i++)
+                {
+                    int dirInx = i % directions.size();
 
-            //Draw center
-            glm::ivec2 center = regions[i].center;
-            inputData[center.y * width + center.x] = glm::vec4(
-                1,1,1,1
-            );
+                    glm::ivec2 checkCoord = currentPoint->b + directions[dirInx];
+                    float checkValue = inputData[checkCoord.y * width + checkCoord.x].x;
+                    if(checkValue>0)
+                    {
+                        point newPoint = 
+                        {
+                            checkCoord,
+                            prevCoord,
+                        };
+                        outlinePoints.push_back(newPoint);
+                        break;
+                    }
+                    prevCoord = checkCoord;
+                }
 
+                currentPoint = &outlinePoints[outlinePoints.size()-1];
+            }
+            while(currentPoint->b != firstPoint.b && currentPoint->c != firstPoint.c);            
+
+            ///Calculate all the properties
+            regions[j].perimeter = (float)outlinePoints.size();
+            regions[j].area = (float)regions[j].points.size();
+            regions[j].compactness = (regions[j].perimeter * regions[j].perimeter) / regions[j].area;
+            regions[j].circularity = (4 * PI * regions[j].area) / (regions[j].perimeter * regions[j].perimeter);
+            
+            for(int i=0; i<regions[j].points.size(); i++)
+            {
+                //Center
+                regions[j].center += glm::uvec2(regions[j].points[i]);
+            }
+            regions[j].center /= regions[j].points.size();
+
+            
+            glm::mat2 covarianceMatrix(0);
+            for(int i=0; i<regions[j].points.size(); i++)
+            {
+                glm::vec2 v = regions[j].points[i] - glm::ivec2(regions[j].center);
+                covarianceMatrix[0][0] += v.x * v.x;
+                covarianceMatrix[1][0] += v.y * v.x;
+                covarianceMatrix[0][1] += v.y * v.x;
+                covarianceMatrix[1][1] += v.y * v.y;
+            }
+            covarianceMatrix /= regions[j].points.size();
+            
+            float trace = covarianceMatrix[0][0] + covarianceMatrix[1][1];
+            float halfTrace = trace/2.0f;
+            float trace2 = trace*trace;
+
+            float determinant = (covarianceMatrix[0][0] * covarianceMatrix[1][1]) - (covarianceMatrix[1][0] * covarianceMatrix[0][1]);
+            
+            float a = pow(trace2 / 4 - determinant, 0.5f);
+
+            regions[j].eigenValue1 =  halfTrace + a;
+            regions[j].eigenValue2 =  halfTrace - a;
+
+            
+            if(covarianceMatrix[0][1]!=0)
+            {
+                regions[j].eigenVector1 = glm::vec2(
+                    regions[j].eigenValue1 - covarianceMatrix[1][1],
+                    covarianceMatrix[0][1]
+                );
+                regions[j].eigenVector2 = glm::vec2(
+                    regions[j].eigenValue2 - covarianceMatrix[1][1],
+                    covarianceMatrix[0][1]
+                );
+            }
+            else if(covarianceMatrix[0][1]!=0)
+            {
+                regions[j].eigenVector1 = glm::vec2(
+                    covarianceMatrix[1][0],
+                    regions[j].eigenValue1 - covarianceMatrix[0][0]
+                );
+                regions[j].eigenVector2 = glm::vec2(
+                    covarianceMatrix[1][0],
+                    regions[j].eigenValue2 - covarianceMatrix[0][0]
+                );
+            }
+            else
+            {
+                regions[j].eigenVector1 = glm::vec2(1,0);
+                regions[j].eigenVector1 = glm::vec2(0,1);
+            }
+
+            //Calculate skeleton
+            if(calculateSkeleton)
+            {
+                //
+                for(int i=0; i<regions[j].points.size(); i++)
+                {
+                    glm::ivec2 current = regions[j].points[i];
+
+                    //Find shortest distance on the outline from the current point  
+                    float shortestDistance1 = 10000000;
+                    int shortestIndex1 = 0;
+                    for(int k=0; k<outlinePoints.size(); k++)
+                    {
+                        glm::vec2 diff = current - outlinePoints[k].b;
+                        float distance = glm::length2(diff);
+
+                        //If distance is less than distance 1 : set distance1 to distance, and distance2 ot distance1
+                        if(distance <= shortestDistance1)
+                        {
+                            shortestDistance1 = distance;
+                            shortestIndex1 = k;
+                        }
+                    }
+                    glm::vec2 pointToBorder1 = outlinePoints[shortestIndex1].b - current;
+
+                    //find another shortest distance that is on the opposite side of the first one.
+                    float shortestDistance2 = 10000000;
+                    int shortestIndex2 = 0;
+                    for(int k=0; k<outlinePoints.size(); k++)
+                    {
+                        glm::vec2 diff = current - outlinePoints[k].b;
+                        float distance = glm::length2(diff);
+                        //If distance is less than distance 1 : set distance1 to distance, and distance2 ot distance1
+                        if(distance <= shortestDistance2)
+                        {
+                            glm::vec2 pointToBorder2 = outlinePoints[k].b - current;
+                            float dot =glm::dot(pointToBorder1, pointToBorder2);
+                            if(dot <0)
+                            {
+                                shortestDistance2 = distance;
+                                shortestIndex2 = k;
+                            }
+                        }
+                    }
+                    
+                    //If the 2 distances are close, we're on the skeleton
+                    if(sqrt(shortestDistance2) - sqrt(shortestDistance1) <=1)
+                    {
+                        inputData[current.y * width + current.x] = glm::vec4(1,0,0,1);
+                    }
+                }
+                
+            }
         }
 
         shouldProcess=false;
@@ -3555,10 +3823,25 @@ void change_symmetryBackwards(unsigned int width, unsigned int height, unsigned 
         *y = j + height / 2;
     }
 }
+
+uint32_t nextPowerOf2(uint32_t input)
+{
+    uint32_t v = input;
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v++;
+
+    return v;
+}
+
 void FFTBlur::Process(GLuint textureIn, GLuint textureOut, int width, int height)
 {
     //Read back from texture
-    std::vector<float> textureData(width * height * 4, 0);
+    std::vector<glm::vec4> textureData(width * height);
     glBindTexture(GL_TEXTURE_2D, textureIn);
     glGetTexImage (GL_TEXTURE_2D,
                     0,
@@ -3567,64 +3850,89 @@ void FFTBlur::Process(GLuint textureIn, GLuint textureOut, int width, int height
                     textureData.data());
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    std::vector<std::complex<double>> textureDataComplexOutCorrectedRed(width * height);
-    std::vector<std::complex<double>> textureDataComplexOutCorrectedGreen(width * height);
-    std::vector<std::complex<double>> textureDataComplexOutCorrectedBlue(width * height);
-    
-    std::vector<std::complex<double>> textureDataComplexOutRed(width * height);
-    std::vector<std::complex<double>> textureDataComplexOutGreen(width * height);
-    std::vector<std::complex<double>> textureDataComplexOutBlue(width * height);
-    
-    std::vector<std::complex<double>> textureDataComplexInRed(width * height);
-    std::vector<std::complex<double>> textureDataComplexInGreen(width * height);
-    std::vector<std::complex<double>> textureDataComplexInBlue(width * height);
-    
-    for(size_t i=0; i<width * height; i++)
+    //The FFT algo only works with power of 2 sizes
+    int correctedWidth = (int)nextPowerOf2((uint32_t)width);
+    int correctedHeight = (int)nextPowerOf2((uint32_t)height);
+
+    //Resize if needed
+    if(textureDataComplexInRed.size() != correctedWidth * correctedHeight)
     {
-        textureDataComplexInRed[i] = std::complex<double>((double)textureData[i * 4 + 0], 0);
-        textureDataComplexInGreen[i] = std::complex<double>((double)textureData[i * 4 + 1], 0);
-        textureDataComplexInBlue[i] = std::complex<double>((double)textureData[i * 4 + 2], 0);
+        
+        textureDataComplexInRed.resize(correctedWidth * correctedHeight, std::complex<double>(0,0));
+        textureDataComplexInGreen.resize(correctedWidth * correctedHeight, std::complex<double>(0,0));
+        textureDataComplexInBlue.resize(correctedWidth * correctedHeight, std::complex<double>(0,0));
+
+        textureDataComplexOutCorrectedRed.resize(correctedWidth * correctedHeight, std::complex<double>(0,0));
+        textureDataComplexOutCorrectedGreen.resize(correctedWidth * correctedHeight, std::complex<double>(0,0));
+        textureDataComplexOutCorrectedBlue.resize(correctedWidth * correctedHeight, std::complex<double>(0,0));
+        
+        textureDataComplexOutRed.resize(correctedWidth * correctedHeight, std::complex<double>(0,0));
+        textureDataComplexOutGreen.resize(correctedWidth * correctedHeight, std::complex<double>(0,0));
+        textureDataComplexOutBlue.resize(correctedWidth * correctedHeight, std::complex<double>(0,0));
+    }
+
+    //Fill spatial domain data
+    for(int y=0; y<correctedHeight; y++)
+    {
+        for(int x=0; x<correctedWidth; x++)
+        {
+            int outInx = y * correctedWidth + x;
+            
+            if(x < width && y < height)
+            {
+                int inInx = y * width + x;    
+                textureDataComplexInRed[outInx] = std::complex<double>((double)textureData[inInx].r, 0);
+                textureDataComplexInGreen[outInx] = std::complex<double>((double)textureData[inInx].g, 0);
+                textureDataComplexInBlue[outInx] = std::complex<double>((double)textureData[inInx].b, 0);
+            }
+            else
+            {
+                textureDataComplexInRed[outInx] = std::complex<double>((double)0, 0);
+                textureDataComplexInGreen[outInx] = std::complex<double>((double)0, 0);
+                textureDataComplexInBlue[outInx] = std::complex<double>((double)0, 0);
+            }
+        }
     }
     
-	
-    fftw_plan planRed = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexInRed.data(), (fftw_complex*)textureDataComplexOutRed.data(), FFTW_FORWARD, FFTW_ESTIMATE);
-    fftw_plan planGreen = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexInGreen.data(), (fftw_complex*)textureDataComplexOutGreen.data(), FFTW_FORWARD, FFTW_ESTIMATE);
-    fftw_plan planBlue = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexInBlue.data(), (fftw_complex*)textureDataComplexOutBlue.data(), FFTW_FORWARD, FFTW_ESTIMATE);
+	//Execute forward transform
+    fftw_plan planRed = fftw_plan_dft_2d(correctedWidth, correctedHeight, (fftw_complex*)textureDataComplexInRed.data(), (fftw_complex*)textureDataComplexOutRed.data(), FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_plan planGreen = fftw_plan_dft_2d(correctedWidth, correctedHeight, (fftw_complex*)textureDataComplexInGreen.data(), (fftw_complex*)textureDataComplexOutGreen.data(), FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_plan planBlue = fftw_plan_dft_2d(correctedWidth, correctedHeight, (fftw_complex*)textureDataComplexInBlue.data(), (fftw_complex*)textureDataComplexOutBlue.data(), FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(planRed);
     fftw_execute(planGreen);
     fftw_execute(planBlue);
 
-
-    for(int y=0; y<height; y++)
+    //Correct the coordinates
+    for(int y=0; y<correctedHeight; y++)
     {
-    for(int x=0; x<width; x++)
-    {
-        int flatInx = y * width + x;
-        
-        uint32_t correctedX=x, correctedY=y;
-        CorrectCoordinates(width, height, x, y, &correctedX, &correctedY);
-        int correctedInx = correctedY * width + correctedX;
-        
-        
-        textureDataComplexOutCorrectedRed[flatInx] = textureDataComplexOutRed[correctedInx];
-        textureDataComplexOutCorrectedGreen[flatInx] = textureDataComplexOutGreen[correctedInx];
-        textureDataComplexOutCorrectedBlue[flatInx] = textureDataComplexOutBlue[correctedInx];
-    }
+        for(int x=0; x<correctedWidth; x++)
+        {
+            int flatInx = y * correctedWidth + x;
+            
+            uint32_t correctedX=x, correctedY=y;
+            CorrectCoordinates(correctedWidth, correctedHeight, x, y, &correctedX, &correctedY);
+            int correctedInx = correctedY * correctedWidth + correctedX;
+            
+            
+            textureDataComplexOutCorrectedRed[flatInx] = textureDataComplexOutRed[correctedInx];
+            textureDataComplexOutCorrectedGreen[flatInx] = textureDataComplexOutGreen[correctedInx];
+            textureDataComplexOutCorrectedBlue[flatInx] = textureDataComplexOutBlue[correctedInx];
+        }
     }
 
-
+    //Filter
     if(filter == Type::BOX)
     {
         ///Box filter
-        int midPointX = width/2;
-        int midPointY = height/2;
-        for(int y=0; y<height; y++)
+        int midPointX = correctedWidth/2;
+        int midPointY = correctedHeight/2;
+        for(int y=0; y<correctedHeight; y++)
         {
-            for(int x=0; x<width; x++)
+            for(int x=0; x<correctedWidth; x++)
             {
                 if(x < midPointX -radius || x > midPointX + radius || y < midPointY - radius || y > midPointY + radius)
                 {
-                    int inx = y * width + x;
+                    int inx = y * correctedWidth + x;
                     textureDataComplexOutCorrectedRed[inx]= std::complex<double>(0,0);
                     textureDataComplexOutCorrectedGreen[inx]= std::complex<double>(0,0);
                     textureDataComplexOutCorrectedBlue[inx]= std::complex<double>(0,0);
@@ -3637,14 +3945,14 @@ void FFTBlur::Process(GLuint textureIn, GLuint textureOut, int width, int height
     }
     else if(filter == Type::CIRCLE)
     {
-        for(int y=0; y<height; y++)
+        for(int y=0; y<correctedHeight; y++)
         {
-            for(int x=0; x<width; x++)
+            for(int x=0; x<correctedWidth; x++)
             {
-                glm::ivec2 coord = glm::ivec2(x,y) - glm::ivec2(width/2, height/2);
+                glm::ivec2 coord = glm::ivec2(x,y) - glm::ivec2(correctedWidth/2, correctedHeight/2);
                 if(sqrt(coord.x * coord.x + coord.y * coord.y) > radius)
                 {
-                    int inx = y * width + x;
+                    int inx = y * correctedWidth + x;
                     textureDataComplexOutCorrectedRed[inx]= std::complex<double>(0,0);
                     textureDataComplexOutCorrectedGreen[inx]= std::complex<double>(0,0);
                     textureDataComplexOutCorrectedBlue[inx]= std::complex<double>(0,0);
@@ -3657,17 +3965,17 @@ void FFTBlur::Process(GLuint textureIn, GLuint textureOut, int width, int height
         float oneOverSigma = 1.0f / sigma;
         float oneOverSigmaSquared = oneOverSigma * oneOverSigma;
         ///Gaussian
-        for(int y=0; y<height; y++)
+        for(int y=0; y<correctedHeight; y++)
         {
-            for(int x=0; x<width; x++)
+            for(int x=0; x<correctedWidth; x++)
             {
-                glm::vec2 coord = glm::vec2(x,y) - glm::vec2(width/2, height/2);
+                glm::vec2 coord = glm::vec2(x,y) - glm::vec2(correctedWidth/2, correctedHeight/2);
                 float mag = exp(-(coord.x * coord.x + coord.y * coord.y) / (2 * oneOverSigmaSquared));
                 // int currendRad =sqrt(coord.x * coord.x + coord.y * coord.y); 
                 // if(currendRad > radius)
                 // {
                     // float cutoff = std::min((float)currendRad / (float)radius, 1.0f);
-                    int inx = y * width + x;
+                    int inx = y * correctedWidth + x;
                     textureDataComplexOutCorrectedRed[inx] *= (double)mag;
                     textureDataComplexOutCorrectedGreen[inx] *= (double)mag;
                     textureDataComplexOutCorrectedBlue[inx] *= (double)mag;
@@ -3677,40 +3985,41 @@ void FFTBlur::Process(GLuint textureIn, GLuint textureOut, int width, int height
     }
 
     
-    //Revert back
-    for(int y=0; y<height; y++)
+    //Change cooridnates
+    for(int y=0; y<correctedHeight; y++)
     {
-        for(int x=0; x<width; x++)
+        for(int x=0; x<correctedWidth; x++)
         {
-            int flatInx = y * width + x;
+            int flatInx = y * correctedWidth + x;
 
             uint32_t correctedX=x, correctedY=y;
-            CorrectCoordinates(width, height, x, y, &correctedX, &correctedY);
-            int correctedInx = correctedY * width + correctedX;
+            CorrectCoordinates(correctedWidth, correctedHeight, x, y, &correctedX, &correctedY);
+            int correctedInx = correctedY * correctedWidth + correctedX;
             textureDataComplexOutRed[correctedInx] = textureDataComplexOutCorrectedRed[flatInx];
             textureDataComplexOutGreen[correctedInx] = textureDataComplexOutCorrectedGreen[flatInx];
             textureDataComplexOutBlue[correctedInx] = textureDataComplexOutCorrectedBlue[flatInx];
         }
     }
     
-    
-    fftw_plan backwardsRed = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexOutRed.data(), (fftw_complex*)textureDataComplexInRed.data(),FFTW_BACKWARD, FFTW_ESTIMATE);
-    fftw_plan backwardsGreen = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexOutGreen.data(), (fftw_complex*)textureDataComplexInGreen.data(),FFTW_BACKWARD, FFTW_ESTIMATE);
-    fftw_plan backwardsBlue = fftw_plan_dft_2d(width, height, (fftw_complex*)textureDataComplexOutBlue.data(), (fftw_complex*)textureDataComplexInBlue.data(),FFTW_BACKWARD, FFTW_ESTIMATE);
+    //Execute backwards transform
+    fftw_plan backwardsRed = fftw_plan_dft_2d(correctedWidth, correctedHeight, (fftw_complex*)textureDataComplexOutRed.data(), (fftw_complex*)textureDataComplexInRed.data(),FFTW_BACKWARD, FFTW_ESTIMATE);
+    fftw_plan backwardsGreen = fftw_plan_dft_2d(correctedWidth, correctedHeight, (fftw_complex*)textureDataComplexOutGreen.data(), (fftw_complex*)textureDataComplexInGreen.data(),FFTW_BACKWARD, FFTW_ESTIMATE);
+    fftw_plan backwardsBlue = fftw_plan_dft_2d(correctedWidth, correctedHeight, (fftw_complex*)textureDataComplexOutBlue.data(), (fftw_complex*)textureDataComplexInBlue.data(),FFTW_BACKWARD, FFTW_ESTIMATE);
     fftw_execute(backwardsRed);
     fftw_execute(backwardsGreen);
     fftw_execute(backwardsBlue);
 
+    //Fill data
     for(int y=0; y<height; y++)
     {
     for(int x=0; x<width; x++)
     {
-        int i = y * (width) + x;
-        float red = (float)textureDataComplexInRed[i].real() / (float)(width * height);
-        float green = (float)textureDataComplexInGreen[i].real() / (float)(width * height);
-        float blue = (float)textureDataComplexInBlue[i].real() / (float)(width * height);
+        int i = y * (correctedWidth) + x;
+        float red = (float)textureDataComplexInRed[i].real() / (float)(correctedWidth * correctedHeight);
+        float green = (float)textureDataComplexInGreen[i].real() / (float)(correctedWidth * correctedHeight);
+        float blue = (float)textureDataComplexInBlue[i].real() / (float)(correctedWidth * correctedHeight);
     
-        int outInx = 4 * (y * width + x);
+        int outInx = (y * width + x);
 
 #if 0
         float mag = (float)abs(textureDataComplexOutCorrectedRed[i].real()) / (float)(width);
@@ -3719,10 +4028,10 @@ void FFTBlur::Process(GLuint textureIn, GLuint textureOut, int width, int height
         textureData[outInx + 2] = mag;
         textureData[outInx + 3] = 1;
 #else
-        textureData[outInx + 0] = red;
-        textureData[outInx + 1] = green;
-        textureData[outInx + 2] = blue;
-        textureData[outInx + 3] = 1;
+        textureData[outInx].r = red;
+        textureData[outInx].g = green;
+        textureData[outInx].b = blue;
+        textureData[outInx].a = 1;
 #endif
     }
     }
@@ -3756,12 +4065,10 @@ void ImageLab::Load() {
     Quad = GetQuad();
     
 
-
-    imageProcessStack.Resize(width, height);
     // imageProcessStack.AddProcess(new ColorDistance(true));
-    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Circles.PNG"));
+    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Rect.PNG"));
+    // imageProcessStack.AddProcess(new FFTBlur(true));
     imageProcessStack.AddProcess(new RegionProperties(true));
-    // imageProcessStack.AddProcess(new RegionProperties(true));
     // imageProcessStack.AddProcess(new AddImage(true, "resources/peppers.png"));
     // imageProcessStack.AddProcess(new Threshold(true));
     // imageProcessStack.AddProcess(new SmoothingFilter(true));
@@ -3795,6 +4102,18 @@ void ImageLab::RenderGUI() {
     ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
     
     ImGui::Begin("Processes : "); 
+    
+    if(ImGui::SliderInt("ResolutionX", &imageProcessStack.width, 1, 2048))
+    {
+        imageProcessStack.Resize(imageProcessStack.width, imageProcessStack.height);
+        shouldProcess=true;
+    }
+    if(ImGui::SliderInt("ResolutionY", &imageProcessStack.height, 1, 2048))
+    {
+        imageProcessStack.Resize(imageProcessStack.width, imageProcessStack.height);
+        shouldProcess=true;
+    }
+
     shouldProcess |= imageProcessStack.RenderGUI();
     ImGui::End();    
 
@@ -3804,13 +4123,21 @@ void ImageLab::RenderGUI() {
         outTexture = imageProcessStack.Process();
         shouldProcess=false;
     }
-
+    
 
     ImGui::Begin("Output");
-    ImVec2 texSize((float)width, (float)height);
-    ImGui::Image((ImTextureID)outTexture, texSize);
-    ImGui::End();
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    imageProcessStack.outputGuiStart.x = cursor.x;
+    imageProcessStack.outputGuiStart.y = cursor.y;
 
+    ImVec2 texSize((float)imageProcessStack.width, (float)imageProcessStack.height);
+    ImGui::Image((ImTextureID)outTexture, texSize);
+    for(int i=0; i<imageProcessStack.imageProcesses.size(); i++)
+    {
+        imageProcessStack.imageProcesses[i]->RenderOutputGui();
+    }
+    ImGui::End();
+    
 
     // glUseProgram(MeshShader.programShaderObject);
     // glActiveTexture(GL_TEXTURE0);

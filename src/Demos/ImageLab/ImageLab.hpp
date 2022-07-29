@@ -6,6 +6,7 @@
 #include "GL_Helpers/GL_Mesh.hpp"
 #include "GL_Helpers/GL_Camera.hpp"
 #include "GL_Helpers/GL_Texture.hpp"
+#include <complex>
 
 struct ImDrawList;
 
@@ -54,6 +55,7 @@ struct ImageProcess
     virtual void Process(GLuint textureIn, GLuint textureOut, int width, int height);
     virtual void SetUniforms();
     virtual bool RenderGui();
+    virtual bool RenderOutputGui();
     virtual void Unload(){
         glDeleteProgram(shader);
     }
@@ -89,9 +91,12 @@ struct ImageProcessStack
     GLuint histogramBuffer, boundsBuffer;
     GL_TextureFloat histogramTexture;
 
+    glm::vec2 outputGuiStart;
+
     bool changed=false;
 
-    int width, height;
+    int width = 1024;
+    int height = 900;
 };
 
 
@@ -508,17 +513,58 @@ struct RegionProperties : public ImageProcess
     RegionProperties(bool enabled=true);
     void SetUniforms() override;
     bool RenderGui() override;
+    bool RenderOutputGui() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height);
     void Unload() override;
+    int GetStartIndex(glm::ivec2 b, glm::ivec2 c);
 
     struct Region
     {
         glm::uvec2 center;
         std::vector<glm::ivec2> points;
+        struct
+        {
+            glm::ivec2 minBB;
+            glm::ivec2 maxBB;
+        } boundingBox;
+        float perimeter=0;
+        float area=0;
+        float compactness=0;
+        float circularity=0;
+
+        float eigenValue1;
+        float eigenValue2;
+        
+        glm::vec2 eigenVector1;
+        glm::vec2 eigenVector2;
+        
+        bool renderGui=false;
+        bool drawBB=false;
+        bool DrawAxes=false;
     };
     std::vector<Region> regions;
 
+    std::vector<glm::ivec2> directions = 
+    {
+        glm::ivec2(-1, 0),//0:Left 
+        glm::ivec2(-1,-1),//1:top left
+        glm::ivec2( 0,-1),//2:top
+        glm::ivec2( 1,-1),//3:top right
+        glm::ivec2( 1, 0),//4:right
+        glm::ivec2( 1, 1),//5:bottom right
+        glm::ivec2( 0, 1),//6:bottom
+        glm::ivec2(-1, 1),//7:bottom left
+    };
+
+    struct point
+    {
+        glm::ivec2 b;
+        glm::ivec2 c;
+    };
+
+
     std::vector<glm::vec4> inputData;
+    bool calculateSkeleton=true;
     bool shouldProcess=true;
 };
 
@@ -681,6 +727,17 @@ struct FFTBlur : public ImageProcess
     bool RenderGui() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height);
 
+
+    std::vector<std::complex<double>> textureDataComplexOutCorrectedRed;
+    std::vector<std::complex<double>> textureDataComplexOutCorrectedGreen;
+    std::vector<std::complex<double>> textureDataComplexOutCorrectedBlue;
+    std::vector<std::complex<double>> textureDataComplexOutRed;
+    std::vector<std::complex<double>> textureDataComplexOutGreen;
+    std::vector<std::complex<double>> textureDataComplexOutBlue;
+    std::vector<std::complex<double>> textureDataComplexInRed;
+    std::vector<std::complex<double>> textureDataComplexInGreen;
+    std::vector<std::complex<double>> textureDataComplexInBlue;
+
     enum class Type 
     {
         BOX,
@@ -723,8 +780,7 @@ private:
     
     // GL_TextureFloat texture;
     // GL_TextureFloat tmpTexture;
-    int width = 1024;
-    int height = 1024;
+    
 
     ImageProcessStack imageProcessStack;
 
