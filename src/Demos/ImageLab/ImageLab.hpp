@@ -321,6 +321,28 @@ struct Erosion : public ImageProcess
     bool shouldRecalculateKernel=true;
 };
 
+struct AddGradient : public ImageProcess
+{
+    AddGradient(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    void RecalculateKernel();
+
+    struct ColorStop
+    {
+        glm::vec3 color;
+        float t;
+    };
+    std::vector<ColorStop> colorStops;
+
+    float rotation;
+    glm::mat2 transformMatrix;
+
+    GL_TextureFloat gradientTexture;
+    std::vector<glm::vec4> gradientData;
+};
+
 struct Dilation : public ImageProcess
 {
     Dilation(bool enabled=true);

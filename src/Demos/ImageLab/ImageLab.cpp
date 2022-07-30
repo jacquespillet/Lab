@@ -509,6 +509,7 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("Transform")) AddProcess(new Transform(true));
         if(ImGui::Button("Resampling")) AddProcess(new Resampling(true));
         if(ImGui::Button("AddNoise")) AddProcess(new AddNoise(true));
+        if(ImGui::Button("AddGradient")) AddProcess(new AddGradient(true));
         if(ImGui::Button("SmoothingFilter")) AddProcess(new SmoothingFilter(true));
         if(ImGui::Button("SharpenFilter")) AddProcess(new SharpenFilter(true));
         if(ImGui::Button("SobelFilter")) AddProcess(new SobelFilter(true));
@@ -1631,6 +1632,147 @@ bool Erosion::RenderGui()
 void Erosion::Unload()
 {
     glDeleteBuffers(1, &kernelBuffer);
+}
+//
+
+//
+//------------------------------------------------------------------------
+AddGradient::AddGradient(bool enabled) : ImageProcess("AddGradient", "shaders/AddGradient.glsl", enabled)
+{
+    TextureCreateInfo tci = {};
+    tci.generateMipmaps =false;
+    tci.srgb=true;
+    tci.minFilter = GL_LINEAR;
+    tci.magFilter = GL_LINEAR;  
+    tci.wrapS = GL_MIRRORED_REPEAT;      
+    tci.wrapT = GL_MIRRORED_REPEAT;      
+    gradientTexture = GL_TextureFloat(255, 1, tci);  
+
+    gradientData.resize(255);     
+
+    colorStops = 
+    {
+        {glm::vec3(1,0,0), 0},
+        {glm::vec3(0,1,0), 0.5},
+        {glm::vec3(0,0,1), 1}
+    };
+
+    RecalculateKernel();
+}
+
+void AddGradient::RecalculateKernel()
+{
+    std::sort(colorStops.begin(), colorStops.end(), [](const ColorStop& a, const ColorStop &b) -> bool 
+    {
+        return a.t < b.t;
+    });        
+
+    int runningInx=0;
+    for(int i=0; i<colorStops.size()-1; i++)
+    {
+        float length = colorStops[i+1].t - colorStops[i].t;
+        int intLength = (int)(length * 255);
+
+        glm::vec3 prevColor = colorStops[i].color;
+        glm::vec3 nextColor = colorStops[i+1].color;
+
+        for(int j=0; j<intLength; j++)
+        {
+            float t = (float)j / (float)intLength;
+            glm::vec3 color = glm::lerp(prevColor, nextColor, t);
+            gradientData[runningInx + j] = glm::vec4(color  ,1);
+        }
+        runningInx += intLength;
+    }
+    
+
+    glBindTexture(GL_TEXTURE_2D, gradientTexture.glTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 255, 1, 0, GL_RGBA, GL_FLOAT, gradientData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);    
+}
+
+void AddGradient::SetUniforms()
+{
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, gradientTexture.glTex);
+    glUniform1i(glGetUniformLocation(shader, "gradientTexture"), 0);
+    
+    glUniformMatrix2fv(glGetUniformLocation(shader, "transform"), 1, GL_FALSE, glm::value_ptr(transformMatrix));
+}
+
+bool AddGradient::RenderGui()
+{
+    bool changed=false;
+
+    bool rotationChanged = ImGui::DragFloat("Rotation", &rotation, 1);
+    if(rotationChanged)
+    {
+        changed=true;
+        float cosTheta = cos(glm::radians(rotation));
+        float sinTheta = sin(glm::radians(rotation));
+        transformMatrix[0][0] = cosTheta;
+        transformMatrix[1][0] = -sinTheta;
+        transformMatrix[0][1] = sinTheta;
+        transformMatrix[1][1] = cosTheta;
+        transformMatrix = glm::inverse(transformMatrix);    
+    }
+
+    if(ImGui::Button("Add")){
+        changed=true;
+        colorStops.push_back({
+            glm::vec3(1),0
+        });
+    }
+
+    std::vector<int> toRemove;
+    float width = ImGui::GetContentRegionMax().x;
+    int maxItems = 3;
+    float itemWidth = width / maxItems;
+    for(int i=0; i<colorStops.size(); i++)
+    {
+        ImGui::SetNextItemWidth(itemWidth);
+        ImGui::PushID(i * 2 + 0);
+        changed |= ImGui::ColorEdit3("Color", glm::value_ptr(colorStops[i].color));
+        ImGui::PopID();
+        
+        if(i!= 0 && i != colorStops.size()-1)
+        {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(itemWidth);
+            ImGui::PushID(i * 2 + 0);
+            changed |= ImGui::SliderFloat("t", &colorStops[i].t, 0, 1);
+            ImGui::PopID();
+
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(itemWidth);
+            ImGui::PushID(i * 2 + 0);
+            if(ImGui::Button("x"))
+            {
+                toRemove.push_back(i);
+                changed = true;
+            }
+            ImGui::PopID();            
+        }
+        
+        ImGui::Separator();
+    }
+
+    for(int i=(int)toRemove.size()-1; i>=0; i--)
+    {
+        colorStops.erase(colorStops.begin() + toRemove[i]);
+    }
+
+    if(changed)
+    {
+        RecalculateKernel();
+    }
+
+    return true;
+}
+
+void AddGradient::Unload()
+{
+    gradientTexture.Unload();
 }
 //
 
@@ -4398,6 +4540,7 @@ void ImageLab::Load() {
     // imageProcessStack.AddProcess(new ColorDistance(true));
     // imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Gradient.jpg"));
     imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.png"));
+    imageProcessStack.AddProcess(new AddGradient(true));
     // imageProcessStack.AddProcess(new Dithering(true));
     // imageProcessStack.AddProcess(new FFTBlur(true));
     // imageProcessStack.AddProcess(new RegionProperties(true));
