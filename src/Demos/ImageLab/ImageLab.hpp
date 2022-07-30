@@ -67,7 +67,6 @@ struct ImageProcess
 
     bool enabled=true;
     bool CheckChanges();
-
 };
 
 struct ImageProcessStack
@@ -92,6 +91,8 @@ struct ImageProcessStack
     GL_TextureFloat histogramTexture;
 
     glm::vec2 outputGuiStart;
+
+    std::vector<glm::vec4> outputImage;
 
     bool changed=false;
 
@@ -248,6 +249,48 @@ struct GaussianBlur : public ImageProcess
     GLuint kernelBuffer;
 
     bool shouldRecalculateKernel=true;
+};
+
+struct HalfToning : public ImageProcess
+{
+    HalfToning(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    void RecalculateKernel();
+    
+    float intensity=1;
+
+    bool grayScale=true;
+    
+    glm::mat3 CalculateTransform(float theta);
+
+    glm::vec3 rotation;
+    glm::mat3 transformR;
+    glm::mat3 transformG;
+    glm::mat3 transformB;
+
+    int size=5;
+    std::vector<float> H;
+    GLuint HBuffer;
+    bool shouldRecalculateH=true;
+
+    int maskType = 0;
+};
+
+
+struct Dithering : public ImageProcess
+{
+    Dithering(bool enabled=true);
+    void SetUniforms() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+    bool RenderGui() override;
+    void Unload() override;
+    
+    AddNoise addNoise;
+    Threshold threshold;
+
+    GL_TextureFloat tmpTexture;
 };
 
 struct Erosion : public ImageProcess
@@ -566,6 +609,27 @@ struct RegionProperties : public ImageProcess
     std::vector<glm::vec4> inputData;
     bool calculateSkeleton=true;
     bool shouldProcess=true;
+};
+
+struct ErrorDiffusionHalftoning : public ImageProcess
+{
+    ErrorDiffusionHalftoning(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height);
+    void Unload() override;
+    void RecalculateMask();
+    std::vector<glm::vec4> inputData;
+    bool shouldProcess=true;
+
+    std::vector<float> mask;
+    std::vector<glm::ivec2> maskIndices;
+
+    bool grayScale=false;
+    float threshold=0.5f;
+
+    bool shouldRecalculateMask;
+    int masktype=0;
 };
 
 struct KMeansCluster : public ImageProcess

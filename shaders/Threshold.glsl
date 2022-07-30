@@ -38,5 +38,5 @@ void main()
         if(color.b > upperBound.b) outputColor.b = 0;
     }
 
-    imageStore ( textureOut , pixelCoord , vec4(outputColor, 0));
+    imageStore ( textureOut , pixelCoord , vec4(outputColor, 1));
 }

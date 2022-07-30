@@ -473,6 +473,16 @@ GLuint ImageProcessStack::Process()
     
     RenderHistogram();
 
+    //Read back from texture
+    if(outputImage.size() != width * height) outputImage.resize(width*height); 
+    glBindTexture(GL_TEXTURE_2D, resultTexture);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    outputImage.data());
+    glBindTexture(GL_TEXTURE_2D, 0);    
+
     return resultTexture;
 }
 
@@ -528,6 +538,10 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("SuperPixelsCluster")) AddProcess(new SuperPixelsCluster(true));
         if(ImGui::Button("Erosion")) AddProcess(new Erosion(true));
         if(ImGui::Button("Dilation")) AddProcess(new Dilation(true));
+        if(ImGui::Button("RegionProperties")) AddProcess(new RegionProperties(true));
+        if(ImGui::Button("HalfToning")) AddProcess(new HalfToning(true));
+        if(ImGui::Button("Dithering")) AddProcess(new Dithering(true));
+        if(ImGui::Button("ErrorDiffusionHalftoning")) AddProcess(new ErrorDiffusionHalftoning(true));
 
         ImGui::EndPopup();
     }
@@ -1110,8 +1124,8 @@ void AddNoise::SetUniforms()
 bool AddNoise::RenderGui()
 {
     bool changed=false;
-    changed |= ImGui::SliderFloat("Density", &density, 0, 1);
-    changed |= ImGui::SliderFloat("Intensity", &intensity, -1, 1);
+    changed |= ImGui::DragFloat("Density", &density, 0.001f);
+    changed |= ImGui::DragFloat("Intensity", &intensity, 0.001f);
     changed |= ImGui::Checkbox("Random Color", &randomColor);
 
     return changed;
@@ -1302,6 +1316,174 @@ bool GaussianBlur::RenderGui()
 void GaussianBlur::Unload()
 {
     glDeleteBuffers(1, &kernelBuffer);
+}
+//
+
+//
+//------------------------------------------------------------------------
+HalfToning::HalfToning(bool enabled) : ImageProcess("HalfToning", "shaders/HalfToning.glsl", enabled)
+{
+    H.resize(5 * 5);
+    glGenBuffers(1, (GLuint*)&HBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, HBuffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, H.size() * sizeof(float), H.data(), GL_DYNAMIC_COPY); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, HBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);     
+}
+
+void HalfToning::RecalculateKernel()
+{
+    if(maskType==0)
+    {
+        float t = 1 / 255.0f;
+        H = 
+        {
+            t * 80,    t * 170,   t * 240,   t * 200,   t * 10,
+            t * 40,    t * 60,    t * 150,   t * 90,   t * 10,
+            t * 140,   t * 210,   t * 250,   t * 220,   t * 30,
+            t * 120,   t * 190,   t * 230,   t * 180,   t * 0,
+            t * 20,    t * 100,   t * 160,   t * 50,   t * 30
+        };
+        size = 5;
+    }
+    else if(maskType==1)
+    {
+        float t = 16 / 255.0f;
+        H = 
+        {
+            t * 1,  t * 9,  t * 3,  t * 11,
+            t * 13, t * 5,  t * 15, t * 7,
+            t * 4,  t * 12, t * 2,  t * 10,
+            t * 16, t * 8,  t * 14, t * 16
+        };
+        size = 4;
+    }
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, HBuffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, H.size() * sizeof(float), H.data(), GL_DYNAMIC_COPY); 
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    shouldRecalculateH=false;
+}
+
+glm::mat3 HalfToning::CalculateTransform(float theta)
+{
+    glm::mat3 transform;
+    float cosTheta = cos(glm::radians(theta));
+    float sinTheta = sin(glm::radians(theta));
+
+    glm::mat3 rotationMatrix(1);
+    rotationMatrix[0][0] = cosTheta;
+    rotationMatrix[1][0] = -sinTheta;
+    rotationMatrix[0][1] = sinTheta;
+    rotationMatrix[1][1] = cosTheta;
+    
+    transform = rotationMatrix;
+    transform = glm::inverse(transform);    
+    return transform;
+
+}
+
+void HalfToning::SetUniforms()
+{
+    if(shouldRecalculateH) RecalculateKernel();
+
+    if(grayScale)
+    {
+        transformR = CalculateTransform(rotation.r);
+        glUniformMatrix3fv(glGetUniformLocation(shader, "rotation"), 1, GL_FALSE, glm::value_ptr(transformR));
+    }
+    else
+    {
+        transformR = CalculateTransform(rotation.r);
+        transformG = CalculateTransform(rotation.g);
+        transformB = CalculateTransform(rotation.b);
+
+        glUniformMatrix3fv(glGetUniformLocation(shader, "rotationR"), 1, GL_FALSE, glm::value_ptr(transformR));
+        glUniformMatrix3fv(glGetUniformLocation(shader, "rotationG"), 1, GL_FALSE, glm::value_ptr(transformG));
+        glUniformMatrix3fv(glGetUniformLocation(shader, "rotationB"), 1, GL_FALSE, glm::value_ptr(transformB));
+    }
+    
+
+    glUniform1i(glGetUniformLocation(shader, "grayScale"), (int)grayScale);
+    glUniform1i(glGetUniformLocation(shader, "size"), size);
+    glUniform1f(glGetUniformLocation(shader, "intensity"), intensity);
+    
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, HBuffer);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, HBuffer);
+}
+
+bool HalfToning::RenderGui()
+{
+    bool changed=false;
+    changed |= ImGui::DragFloat("Intensity", &intensity, 0.01f);
+    
+    changed |= ImGui::Checkbox("GrayScale", &grayScale);
+
+    if(grayScale)
+    {
+        changed |= ImGui::DragFloat("Rotation", &rotation.x, 1.0f);
+    }
+    else
+    {
+        changed |= ImGui::DragFloat("Rotation R", &rotation.x, 1.0f);
+        changed |= ImGui::DragFloat("Rotation G", &rotation.y, 1.0f);
+        changed |= ImGui::DragFloat("Rotation B", &rotation.z, 1.0f);
+    }
+    shouldRecalculateH |= ImGui::Combo("Mask Type", &maskType, "Type0\0Type1\0\0");
+    // shouldRecalculateKernel |= ImGui::SliderFloat("Sigma", &sigma, 1, 10);
+
+    changed |= shouldRecalculateH;
+    return changed;
+}
+
+void HalfToning::Unload()
+{
+    glDeleteBuffers(1, &HBuffer);
+}
+//
+
+//
+//------------------------------------------------------------------------
+Dithering::Dithering(bool enabled) : ImageProcess("Dithering", "", enabled)
+{  
+    addNoise.density=2;
+    addNoise.intensity=0.05f;
+    threshold.binary=true;
+    threshold.global=true;
+    threshold.globalLower = 0.3f;
+    threshold.globalUpper = 1;
+}
+
+void Dithering::SetUniforms()
+{
+}
+
+bool Dithering::RenderGui()
+{
+    bool changed=false;
+    changed |= addNoise.RenderGui();
+    changed |= threshold.RenderGui();
+    return changed;
+}
+void Dithering::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    if(tmpTexture.width != width || tmpTexture.height != height || !tmpTexture.loaded)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.srgb=true;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
+        tmpTexture = GL_TextureFloat(width, height, tci);         
+    }
+
+    addNoise.Process(textureIn, tmpTexture.glTex, width, height);
+    threshold.Process(tmpTexture.glTex, textureOut, width, height);
+}
+void Dithering::Unload()
+{
+
 }
 //
 
@@ -2584,6 +2766,154 @@ void KMeansCluster::Process(GLuint textureIn, GLuint textureOut, int width, int 
             }
         }
 
+        shouldProcess=false;
+    }
+
+
+    glBindTexture(GL_TEXTURE_2D, textureOut);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+//
+//
+
+//
+//------------------------------------------------------------------------
+ErrorDiffusionHalftoning::ErrorDiffusionHalftoning(bool enabled) : ImageProcess("ErrorDiffusionHalftoning", "", enabled)
+{
+    RecalculateMask();
+}
+
+void ErrorDiffusionHalftoning::Unload()
+{
+    glDeleteProgram(shader);
+}
+
+void ErrorDiffusionHalftoning::SetUniforms()
+{
+}
+
+bool ErrorDiffusionHalftoning::RenderGui()
+{
+    bool changed=false;
+    
+    if(ImGui::Button("Process")) shouldProcess=true;
+    shouldProcess |= ImGui::SliderFloat("Threshold", &threshold, 0, 1);
+    shouldProcess |= ImGui::Checkbox("GrayScale", &grayScale);
+    shouldRecalculateMask |= ImGui::Combo("Mask Type", &masktype, "Floyd Steinberg\0 Stucky\0\0");
+    
+    shouldProcess |= shouldRecalculateMask;
+    changed |= shouldProcess;
+    return changed;
+}
+
+float Color2GrayScale(glm::vec3 color)
+{
+    return (color.r + color.g + color.b) * 0.33333f;
+}
+
+glm::vec4 GrayScale2Color(float grayScale, float alpha=0)
+{
+    return glm::vec4(grayScale,grayScale,grayScale, alpha);
+}
+
+void ErrorDiffusionHalftoning::RecalculateMask()
+{
+    if(masktype==0)
+    {
+        float t = 1.f/16.f;
+        mask = 
+        {
+            t * 1, t * 3, t * 5, t * 1
+        };
+
+        maskIndices = 
+        {
+            glm::ivec2( 1, 0),
+            glm::ivec2(-1, 1),
+            glm::ivec2( 0, 1),
+            glm::ivec2( 1, 1),
+        };
+    }
+    else if(masktype==1)
+    {
+        float t = 1.f/42.f;
+        mask = 
+        {
+                                 t * 8, t * 4, 
+            t * 2, t * 4, t * 8, t * 4, t * 2,
+            t * 1, t * 2, t * 4, t * 2, t * 1,
+        };
+
+        maskIndices = 
+        {
+                                                                     glm::ivec2( 1, 0), glm::ivec2( 2, 0),
+            glm::ivec2(-2, 1), glm::ivec2(-1, 1), glm::ivec2( 0, 1), glm::ivec2( 1, 1), glm::ivec2( 2, 1), 
+            glm::ivec2(-2, 2), glm::ivec2(-1, 2), glm::ivec2( 0, 2), glm::ivec2( 1, 2), glm::ivec2( 2, 2),
+        };        
+    }
+}
+
+void ErrorDiffusionHalftoning::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    if(shouldRecalculateMask)
+    {
+        RecalculateMask();
+        shouldRecalculateMask=false;
+    }
+    inputData.resize(width * height);
+    glBindTexture(GL_TEXTURE_2D, textureIn);
+    glGetTexImage (GL_TEXTURE_2D,
+                    0,
+                    GL_RGBA, // GL will convert to this format
+                    GL_FLOAT,   // Using this data type per-pixel
+                    inputData.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+    
+    if(shouldProcess)
+    {
+        for(int y=0; y<height; y++)
+        {
+            for(int x=0; x<width; x++)
+            {
+                //Serpentine loop through the image
+                bool pairLine = (y%2==0);
+                int sampleX = pairLine ? x : width - 1 - x;
+                // int sampleX = x;
+                
+                //Get Color
+                int inx = y * width + sampleX;
+                glm::vec3 color = inputData[inx];
+                if(grayScale) color = GrayScale2Color(Color2GrayScale(color), 1);
+
+                //quantize
+                glm::vec3 newColor(0);
+                if(color.r<threshold) newColor.r=0;
+                else                    newColor.r=1;
+                
+                if(color.g<threshold) newColor.g=0;
+                else                    newColor.g=1;
+                
+                if(color.b<threshold) newColor.b=0;
+                else                    newColor.b=1;
+                
+                inputData[inx] = glm::vec4(newColor,1);
+
+                //Get error
+                glm::vec3 error = color -  newColor;
+
+                //do the halftoning
+                for(int i=0; i<maskIndices.size(); i++)
+                {
+                    glm::ivec2 coord = glm::ivec2(sampleX, y) + maskIndices[i];
+                    int maskInx = coord.y * width + coord.x;
+                    if(maskInx <0 || maskInx>inputData.size()) continue;
+                    
+                    inputData[maskInx] += glm::vec4(error * mask[i], 0);
+                }
+            }
+        }
+       
         shouldProcess=false;
     }
 
@@ -3983,7 +4313,6 @@ void FFTBlur::Process(GLuint textureIn, GLuint textureOut, int width, int height
             }
         }
     }
-
     
     //Change cooridnates
     for(int y=0; y<correctedHeight; y++)
@@ -4022,11 +4351,12 @@ void FFTBlur::Process(GLuint textureIn, GLuint textureOut, int width, int height
         int outInx = (y * width + x);
 
 #if 0
-        float mag = (float)abs(textureDataComplexOutCorrectedRed[i].real()) / (float)(width);
-        textureData[outInx + 0] = mag;
-        textureData[outInx + 1] = mag;
-        textureData[outInx + 2] = mag;
-        textureData[outInx + 3] = 1;
+        float mag = log2((float)abs(textureDataComplexOutCorrectedRed[i]) / (float)correctedWidth + 1);
+        // float mag = textureDataComplexOutCorrectedRed[i].real();
+        textureData[outInx].r = mag;
+        textureData[outInx].g = mag;
+        textureData[outInx].b = mag;
+        textureData[outInx].a = 1;
 #else
         textureData[outInx].r = red;
         textureData[outInx].g = green;
@@ -4066,9 +4396,11 @@ void ImageLab::Load() {
     
 
     // imageProcessStack.AddProcess(new ColorDistance(true));
-    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Rect.PNG"));
+    // imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Gradient.jpg"));
+    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.png"));
+    // imageProcessStack.AddProcess(new Dithering(true));
     // imageProcessStack.AddProcess(new FFTBlur(true));
-    imageProcessStack.AddProcess(new RegionProperties(true));
+    // imageProcessStack.AddProcess(new RegionProperties(true));
     // imageProcessStack.AddProcess(new AddImage(true, "resources/peppers.png"));
     // imageProcessStack.AddProcess(new Threshold(true));
     // imageProcessStack.AddProcess(new SmoothingFilter(true));
@@ -4101,6 +4433,10 @@ void ImageLab::RenderGUI() {
     ImGuiID dockspace_id = ImGui::GetID("ImageLabDockSpace");
     ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
     
+    ////////////////////////////////////////////////////////////////////////////////////
+    //Processes side panel
+    ////////////////////////////////////////////////////////////////////////////////////
+    
     ImGui::Begin("Processes : "); 
     
     if(ImGui::SliderInt("ResolutionX", &imageProcessStack.width, 1, 2048))
@@ -4124,7 +4460,10 @@ void ImageLab::RenderGUI() {
         shouldProcess=false;
     }
     
-
+   
+    ////////////////////////////////////////////////////////////////////////////////////
+    //Output central window
+    ////////////////////////////////////////////////////////////////////////////////////
     ImGui::Begin("Output");
     ImVec2 cursor = ImGui::GetCursorScreenPos();
     imageProcessStack.outputGuiStart.x = cursor.x;
@@ -4137,14 +4476,30 @@ void ImageLab::RenderGUI() {
         imageProcessStack.imageProcesses[i]->RenderOutputGui();
     }
     ImGui::End();
+
+    ////////////////////////////////////////////////////////////////////////////////////
+    //Pixel information
+    ////////////////////////////////////////////////////////////////////////////////////
+    ImGui::Begin("Pixel infos");
+    ImGuiIO &io = ImGui::GetIO();
+    //std::cout << io.MousePos.x << " " << io.MousePos.y << std::endl;
+    glm::vec2 mousePos(io.MousePos.x, io.MousePos.y);
+    mousePos -= imageProcessStack.outputGuiStart;
+    mousePos = glm::clamp(mousePos, glm::vec2(0), glm::vec2(imageProcessStack.width, imageProcessStack.height));
+
+    glm::vec4 color(0);
+
+    int inx = (int)(mousePos.y * imageProcessStack.width + mousePos.x);
+    if(inx>=0 && inx < imageProcessStack.outputImage.size())color  = imageProcessStack.outputImage[inx];    
+
+    ImGui::Text("Mouse Position : %f, %f", mousePos.x, mousePos.y);
+    ImGui::SameLine();
+    ImGui::Text("Color : %f, %f, %f, %f", color.x, color.y, color.z, color.w);
+    ImGui::SameLine();
+    ImGui::ColorButton("C", ImVec4(color.r, color.g, color.b, color.a));
+
+    ImGui::End();
     
-
-    // glUseProgram(MeshShader.programShaderObject);
-    // glActiveTexture(GL_TEXTURE0);
-    // glBindTexture(GL_TEXTURE_2D, outTexture);
-    // glUniform1i(glGetUniformLocation(MeshShader.programShaderObject, "textureImage"), 0);
-    // Quad->RenderShader(MeshShader.programShaderObject);
-
     ImGui::End();    
 }
 
