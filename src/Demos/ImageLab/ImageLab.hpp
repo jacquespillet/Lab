@@ -411,6 +411,8 @@ struct GaussianPyramid : public ImageProcess
     void Unload() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
     void CopyTexture(GLuint textureIn, GLuint textureOut, int width, int height);
+    void Build(GLuint textureIn, int width, int height);
+
     int depth=5;
     std::vector<GL_TextureFloat> pyramid;
     std::vector<GL_TextureFloat> pyramidTmp;
@@ -434,6 +436,7 @@ struct LaplacianPyramid : public ImageProcess
     void SubtractTexture(GLuint textureA, GLuint textureB, int width, int height);
     void AddTexture(GLuint textureA, GLuint textureB, int width, int height);
     void ClearTexture(GLuint textureA, int width, int height);
+    void Build(GLuint textureIn, int width, int height);
 
     GaussianPyramid gaussianPyramid;
 
@@ -500,6 +503,46 @@ struct HardComposite : public ImageProcess
     bool doBlur=false;
     GL_TextureFloat smoothedMaskTexture;
     SmoothingFilter smoothFilter;
+
+    bool selected=false;
+
+    bool mousePressed=false;
+    glm::vec2 previousMousPos = glm::vec2(-1);
+
+};
+
+struct MultiResComposite : public ImageProcess
+{
+    MultiResComposite(bool enabled=true, char* fileName="");
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    
+    virtual bool MouseMove(float x, float y) override;
+    virtual bool MousePressed() override;
+    virtual bool MouseReleased() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+
+    void Reconstruct(GLuint textureOut, GLuint sourceTexture, GLuint destTexture, GLuint maskTexture, int width, int height);
+
+    //Mask
+    GL_TextureFloat maskTexture;
+    std::vector<glm::vec4> maskData;
+    GLint viewMaskShader;
+    int radius=25;
+    bool drawingMask=false;
+    bool adding=true;
+    GaussianPyramid maskPyramid;
+
+    //Source texture
+    char fileName[128];
+    GL_TextureFloat texture;
+    bool filenameChanged=false;
+    LaplacianPyramid sourcePyramid;
+    
+    LaplacianPyramid destPyramid;
+
+    int depth = 5;
 
     bool selected=false;
 

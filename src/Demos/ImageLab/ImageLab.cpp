@@ -547,6 +547,7 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("HardComposite")) AddProcess(new HardComposite(true));
         if(ImGui::Button("GaussianPyramid")) AddProcess(new GaussianPyramid(true));
         if(ImGui::Button("LaplacianPyramid")) AddProcess(new LaplacianPyramid(true));
+        if(ImGui::Button("MultiResComposite")) AddProcess(new MultiResComposite(true));
 
         ImGui::EndPopup();
     }
@@ -2125,7 +2126,7 @@ void GaussianPyramid::CopyTexture(GLuint textureIn, GLuint textureOut, int width
     glMemoryBarrier(GL_ALL_BARRIER_BITS);   
 }
 
-void GaussianPyramid::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+void GaussianPyramid::Build(GLuint textureIn, int width, int height)
 {
     if(currentWidth != width || currentHeight != height || depthChanged)
     {
@@ -2150,10 +2151,8 @@ void GaussianPyramid::Process(GLuint textureIn, GLuint textureOut, int width, in
         }
     }
 
-
-    //Copy TextureIn into pyramid[0];
+  //Copy TextureIn into pyramid[0];
     CopyTexture(textureIn, pyramid[0].glTex, pyramid[0].width, pyramid[0].height);
-
     for(int i=0; i<pyramid.size()-1; i++)
     {
 #if 1
@@ -2163,7 +2162,11 @@ void GaussianPyramid::Process(GLuint textureIn, GLuint textureOut, int width, in
         CopyTexture(pyramid[i].glTex, pyramid[i+1].glTex, pyramid[i+1].width, pyramid[i+1].height);
 #endif
     }
+}
 
+void GaussianPyramid::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    Build(textureIn, width, height);
     CopyTexture(pyramid[output].glTex, textureOut, width, height);
 }
 //
@@ -2197,6 +2200,7 @@ void LaplacianPyramid::Unload()
 {
   
 }
+
 
 void LaplacianPyramid::SubtractTexture(GLuint textureA, GLuint textureB, int width, int height)
 {
@@ -2246,9 +2250,9 @@ void LaplacianPyramid::ClearTexture(GLuint texture, int width, int height)
     glMemoryBarrier(GL_ALL_BARRIER_BITS);     
 }
 
-void LaplacianPyramid::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+void LaplacianPyramid::Build(GLuint textureIn, int width, int height)
 {
-    gaussianPyramid.Process(textureIn, textureOut, width, height);
+    gaussianPyramid.Build(textureIn, width, height);
 
     for(int i=0; i<gaussianPyramid.pyramid.size()-1; i++)
     {
@@ -2257,13 +2261,20 @@ void LaplacianPyramid::Process(GLuint textureIn, GLuint textureOut, int width, i
                         gaussianPyramid.pyramid[i].width, 
                         gaussianPyramid.pyramid[i].height);
     }
-    
+        
+}
+
+
+void LaplacianPyramid::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    Build(textureIn, width, height);
 
     if(outputReconstruction)
     {
         ClearTexture(textureOut, width, height);
         for(int i=gaussianPyramid.depth-1; i>=0; i--)
         {
+
             AddTexture(textureOut, gaussianPyramid.pyramid[i].glTex, width, height);
         }
     }
@@ -2437,10 +2448,10 @@ void HardComposite::Process(GLuint textureIn, GLuint textureOut, int width, int 
         glUniform1i(glGetUniformLocation(viewMaskShader, "textureOut"), 1); //program must be active
         glBindImageTexture(1, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
         
-        glUniform1i(glGetUniformLocation(compositeShader, "mask"), 2); //program must be active
+        glUniform1i(glGetUniformLocation(viewMaskShader, "mask"), 2); //program must be active
         glBindImageTexture(2, maskTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
         
-        glUniform1i(glGetUniformLocation(compositeShader, "sourceTexture"), 3); //program must be active
+        glUniform1i(glGetUniformLocation(viewMaskShader, "sourceTexture"), 3); //program must be active
         glBindImageTexture(3, texture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
         
         glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
@@ -2594,6 +2605,227 @@ bool HardComposite::MousePressed()
 }
 
 bool HardComposite::MouseReleased() 
+{
+    mousePressed=false;
+    return false;
+}
+
+
+//
+//
+//------------------------------------------------------------------------
+MultiResComposite::MultiResComposite(bool enabled, char* newFileName) : ImageProcess("MultiResComposite", "shaders/MultiResComposite.glsl", enabled)
+{
+    CreateComputeShader("shaders/HardCompositeViewMask.glsl", &viewMaskShader);
+    
+    strcpy(this->fileName, newFileName);
+    if(strcmp(this->fileName, "")!=0) 
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
+        
+        if(texture.loaded) texture.Unload();
+        texture = GL_TextureFloat(std::string(fileName), tci);
+    	filenameChanged = false;        
+    }    
+}
+
+void MultiResComposite::Reconstruct(GLuint textureOut, GLuint sourceTexture, GLuint destTexture, GLuint mask, int width, int height)
+{
+ 	glUseProgram(shader);
+	
+    //Bind image A
+    glUniform1i(glGetUniformLocation(shader, "textureOut"), 0); //program must be active
+    glBindImageTexture(0, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    
+    //Bind sampler
+	glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sourceTexture);
+    glUniform1i(glGetUniformLocation(shader, "sourceTexture"), 0);
+    
+    //Bind sampler
+	glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, destTexture);
+    glUniform1i(glGetUniformLocation(shader, "destTexture"), 1);
+    
+    //Bind sampler
+	glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, mask);
+    glUniform1i(glGetUniformLocation(shader, "maskTexture"), 2);
+    
+     
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+	glUseProgram(0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);       
+}
+
+
+void MultiResComposite::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    if(maskTexture.width != imageProcessStack->width || maskTexture.height != imageProcessStack->height || !maskTexture.loaded)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR; 
+        if(maskTexture.loaded) maskTexture.Unload();
+        maskTexture = GL_TextureFloat(imageProcessStack->width, imageProcessStack->height, tci);
+        maskData.resize(maskTexture.width * maskTexture.height);
+    }
+
+    if(drawingMask)
+    {
+        glUseProgram(viewMaskShader);
+        SetUniforms();
+
+        glUniform1i(glGetUniformLocation(viewMaskShader, "textureIn"), 0); //program must be active
+        glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(viewMaskShader, "textureOut"), 1); //program must be active
+        glBindImageTexture(1, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(viewMaskShader, "mask"), 2); //program must be active
+        glBindImageTexture(2, maskTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(viewMaskShader, "sourceTexture"), 3); //program must be active
+        glBindImageTexture(3, texture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+    }
+    else
+    {
+        sourcePyramid.Build(texture.glTex, texture.width, texture.height);
+        destPyramid.Build(textureIn, width, height);
+        maskPyramid.Build(maskTexture.glTex, maskTexture.width, maskTexture.height);
+        
+        sourcePyramid.ClearTexture(textureOut, width, height);
+        
+        for(int i=sourcePyramid.gaussianPyramid.depth-1; i>=0; i--)
+        {
+            Reconstruct(textureOut, 
+                        sourcePyramid.gaussianPyramid.pyramid[i].glTex,
+                        destPyramid.gaussianPyramid.pyramid[i].glTex,
+                        maskPyramid.pyramid[i].glTex,
+                        width, height);
+
+        }
+    }
+}
+
+void MultiResComposite::SetUniforms()
+{
+
+}
+
+bool MultiResComposite::RenderGui()
+{
+    bool changed=false;
+    selected=true;
+    
+    float sigma = maskPyramid.gaussianBlur.sigma;
+    int size = maskPyramid.gaussianBlur.size;
+    changed |= ImGui::SliderFloat("Sigma", &sigma, 0, 10);
+    changed |= ImGui::SliderInt("Size", &size, 3, 21);
+
+    maskPyramid.gaussianBlur.sigma = sigma;
+    maskPyramid.gaussianBlur.size = size;
+    sourcePyramid.gaussianPyramid.gaussianBlur.sigma = sigma;
+    sourcePyramid.gaussianPyramid.gaussianBlur.size = size;
+    destPyramid.gaussianPyramid.gaussianBlur.sigma = sigma;
+    destPyramid.gaussianPyramid.gaussianBlur.size = size;
+
+    ImGui::Text("Mask");
+    changed |= ImGui::Checkbox("Draw Mask", &drawingMask);
+    if(drawingMask)
+    {
+        changed |= ImGui::SliderInt("Radius", &radius, 1, 25);
+        changed |= ImGui::Checkbox("Add", &adding);
+    }
+
+    ImGui::Separator();
+    filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    if(filenameChanged)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
+        
+        if(texture.loaded) texture.Unload();
+        texture = GL_TextureFloat(std::string(fileName), tci);
+        
+		changed=true;
+		filenameChanged = false;
+    }
+
+    return changed;
+}
+
+
+void MultiResComposite::Unload()
+{
+    maskTexture.Unload();
+    texture.Unload();
+    glDeleteProgram(viewMaskShader);
+}
+
+bool MultiResComposite::MouseMove(float x, float y) 
+{
+    if(x<0 || !selected && !drawingMask) return false;
+
+    bool drawChanged=false;
+    glm::vec2 currentMousPos(x, y);
+    
+    if(mousePressed && previousMousPos != currentMousPos)
+    {
+        glm::vec2 diff = currentMousPos - previousMousPos;
+        float diffLength = std::ceil(glm::length(diff));
+        for(float i=0; i<diffLength; i++)
+        {
+            float t = i / diffLength;
+            glm::vec2 delta = t * diff;
+            glm::ivec2 c = previousMousPos + delta;
+            for(int ky=-radius; ky <=radius; ky++)
+            {
+                for(int kx=-radius; kx <=radius; kx++)
+                {
+                    if((ky*ky + kx+kx) < radius*radius)
+                    {
+                        glm::ivec2 coord(c.x + kx, c.y + ky);
+                        if(coord.x <0 || coord.y < 0 || coord.x >= maskTexture.width || coord.y >= maskTexture.height) continue;
+                        int inx = coord.y * maskTexture.width + coord.x;
+                        maskData[inx] = adding ? glm::vec4(1,1,1,1) : glm::vec4(0,0,0,1);
+                    }
+                }
+            }
+        }
+
+
+        glBindTexture(GL_TEXTURE_2D, maskTexture.glTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, maskTexture.width, maskTexture.height, 0, GL_RGBA, GL_FLOAT, maskData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);        
+
+        drawChanged=true;
+    }
+
+    previousMousPos = currentMousPos;
+
+    selected=false;
+
+    return drawChanged;
+}
+
+bool MultiResComposite::MousePressed() 
+{
+    mousePressed=true;
+    return false;
+}
+
+bool MultiResComposite::MouseReleased() 
 {
     mousePressed=false;
     return false;
@@ -5077,7 +5309,7 @@ void ImageLab::Load() {
     // imageProcessStack.AddProcess(new ColorDistance(true));
     // imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Gradient.jpg"));
     imageProcessStack.AddProcess(new AddImage(true, "resources\\Target.png"));
-    imageProcessStack.AddProcess(new LaplacianPyramid(true));
+    imageProcessStack.AddProcess(new MultiResComposite(true, "resources\\Source.png"));
     // imageProcessStack.AddProcess(new Dithering(true));
     // imageProcessStack.AddProcess(new FFTBlur(true));
     // imageProcessStack.AddProcess(new RegionProperties(true));
