@@ -59,6 +59,10 @@ struct ImageProcess
     virtual void Unload(){
         glDeleteProgram(shader);
     }
+
+    virtual bool MouseMove(float x, float y) {return false;}
+    virtual bool MousePressed() {return false;}
+    virtual bool MouseReleased() {return false;}
     std::string shaderFileName;
     std::string name;
     GLint shader;
@@ -397,6 +401,70 @@ struct MultiplyImage : public ImageProcess
     GL_TextureFloat texture;
     bool filenameChanged=false;
     float multiplier=1;
+};
+
+struct PenDraw : public ImageProcess
+{
+    PenDraw(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    
+    virtual bool MouseMove(float x, float y) override;
+    virtual bool MousePressed() override;
+    virtual bool MouseReleased() override;
+
+    GL_TextureFloat paintTexture;
+    std::vector<glm::vec4> paintData;
+    std::vector<bool> paintedPixels;
+
+    bool mousePressed=false;
+    glm::vec2 previousMousPos = glm::vec2(-1);
+
+    int radius=5;
+    glm::vec3 color = glm::vec3(1,0,0);
+
+    std::vector<glm::ivec2> contourPoints;
+
+    bool selected=false;
+};
+
+struct HardComposite : public ImageProcess
+{
+    HardComposite(bool enabled=true, char* fileName="");
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    
+    virtual bool MouseMove(float x, float y) override;
+    virtual bool MousePressed() override;
+    virtual bool MouseReleased() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+
+    //Mask
+    GL_TextureFloat maskTexture;
+    std::vector<glm::vec4> maskData;
+    GLint viewMaskShader;
+    int radius=25;
+    bool drawingMask=false;
+    bool adding=true;
+
+    //Source texture
+    char fileName[128];
+    GL_TextureFloat texture;
+    bool filenameChanged=false;
+    GLint compositeShader;
+
+    //Weighted transition
+    bool doBlur=false;
+    GL_TextureFloat smoothedMaskTexture;
+    SmoothingFilter smoothFilter;
+
+    bool selected=false;
+
+    bool mousePressed=false;
+    glm::vec2 previousMousPos = glm::vec2(-1);
+
 };
 
 struct CurveGrading : public ImageProcess
@@ -875,4 +943,5 @@ private:
 
     bool firstFrame=true;
 
+    float zoomLevel=1;
 };

@@ -312,8 +312,8 @@ void ImageProcessStack::Resize(int newWidth, int newHeight)
     if(tex0.loaded) tex0.Unload();
     
     TextureCreateInfo tci = {};
-    tci.minFilter = GL_LINEAR;
-    tci.magFilter = GL_LINEAR;
+    tci.minFilter = GL_NEAREST;
+    tci.magFilter = GL_NEAREST;
     tex1 = GL_TextureFloat(newWidth, newHeight, tci);
     tex0 = GL_TextureFloat(newWidth, newHeight, tci);
 
@@ -543,6 +543,8 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("HalfToning")) AddProcess(new HalfToning(true));
         if(ImGui::Button("Dithering")) AddProcess(new Dithering(true));
         if(ImGui::Button("ErrorDiffusionHalftoning")) AddProcess(new ErrorDiffusionHalftoning(true));
+        if(ImGui::Button("PenDraw")) AddProcess(new PenDraw(true));
+        if(ImGui::Button("HardComposite")) AddProcess(new HardComposite(true));
 
         ImGui::EndPopup();
     }
@@ -2062,6 +2064,332 @@ void MultiplyImage::Unload()
 {
     texture.Unload();
 }
+//
+
+//
+//------------------------------------------------------------------------
+PenDraw::PenDraw(bool enabled) : ImageProcess("PenDraw", "shaders/AddImage.glsl", enabled)
+{
+}
+
+
+void PenDraw::SetUniforms()
+{
+    if(paintTexture.width != imageProcessStack->width || paintTexture.height != imageProcessStack->height || !paintTexture.loaded)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR; 
+        if(paintTexture.loaded) paintTexture.Unload();
+        paintTexture = GL_TextureFloat(imageProcessStack->width, imageProcessStack->height, tci);
+
+        paintData.resize(paintTexture.width * paintTexture.height);
+        paintedPixels.resize(paintTexture.width * paintTexture.height, false);
+    }
+
+    glUniform1f(glGetUniformLocation(shader, "multiplier"), 1);    
+
+    glUniform1i(glGetUniformLocation(shader, "textureToAdd"), 2); //program must be active
+    glBindImageTexture(2, paintTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+}
+
+bool PenDraw::RenderGui()
+{
+    bool changed=false;
+    selected=true;
+    
+    if(ImGui::Button("Clear"))
+    {
+        std::fill(paintData.begin(), paintData.end(), glm::vec4(0,0,0,1));
+        std::fill(paintedPixels.begin(), paintedPixels.end(), false);
+        glBindTexture(GL_TEXTURE_2D, paintTexture.glTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, paintTexture.width, paintTexture.height, 0, GL_RGBA, GL_FLOAT, paintData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);              
+        changed=true;
+    }
+
+    changed |= ImGui::SliderInt("Radius", &radius, 1, 25);
+    changed |= ImGui::ColorEdit3("Color", glm::value_ptr(color));
+
+    return changed;
+}
+
+
+void PenDraw::Unload()
+{
+    paintTexture.Unload();
+}
+
+bool PenDraw::MouseMove(float x, float y) 
+{
+    if(x<0 || !selected) return false;
+
+    bool drawChanged=false;
+    glm::vec2 currentMousPos(x, y);
+    
+    if(mousePressed && previousMousPos != currentMousPos)
+    {
+        glm::vec2 diff = currentMousPos - previousMousPos;
+        float diffLength = std::ceil(glm::length(diff));
+        for(float i=0; i<diffLength; i++)
+        {
+            float t = i / diffLength;
+            glm::vec2 delta = t * diff;
+            glm::ivec2 c = previousMousPos + delta;
+            
+#if 0
+            if(contourPoints.size()==0 || (contourPoints.size() > 0 && c != contourPoints[contourPoints.size()-1]))
+            {
+                contourPoints.push_back(c);
+                paintedPixels[c.y * paintTexture.width + c.x]=true;
+                paintData[c.y * paintTexture.width + c.x ] = glm::vec4(color,1);
+            }
+#endif
+
+            for(int ky=-radius; ky <=radius; ky++)
+            {
+                for(int kx=-radius; kx <=radius; kx++)
+                {
+                    if((ky*ky + kx+kx) < radius*radius)
+                    {
+                        glm::ivec2 coord(c.x + kx, c.y + ky);
+                        int inx = coord.y * paintTexture.width + coord.x;
+                        paintData[inx] = glm::vec4(color,1);
+                    }
+                }
+            }
+        }
+
+
+        glBindTexture(GL_TEXTURE_2D, paintTexture.glTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, paintTexture.width, paintTexture.height, 0, GL_RGBA, GL_FLOAT, paintData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);        
+
+        drawChanged=true;
+    }
+
+    previousMousPos = currentMousPos;
+
+    selected=false;
+
+    return drawChanged;
+}
+
+bool PenDraw::MousePressed() 
+{
+    mousePressed=true;
+    contourPoints.clear();
+    return false;
+}
+
+bool PenDraw::MouseReleased() 
+{
+    mousePressed=false;
+    return false;
+}
+
+
+//
+
+//
+//------------------------------------------------------------------------
+HardComposite::HardComposite(bool enabled, char* newFileName) : ImageProcess("HardComposite", "", enabled)
+{
+    CreateComputeShader("shaders/HardCompositeViewMask.glsl", &viewMaskShader);
+    CreateComputeShader("shaders/HardComposite.glsl", &compositeShader);
+    
+    strcpy(this->fileName, newFileName);
+    if(strcmp(this->fileName, "")!=0) 
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
+        
+        if(texture.loaded) texture.Unload();
+        texture = GL_TextureFloat(std::string(fileName), tci);
+    	filenameChanged = false;        
+    }    
+}
+
+
+void HardComposite::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    if(drawingMask)
+    {
+        glUseProgram(viewMaskShader);
+        SetUniforms();
+
+        glUniform1i(glGetUniformLocation(viewMaskShader, "textureIn"), 0); //program must be active
+        glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(viewMaskShader, "textureOut"), 1); //program must be active
+        glBindImageTexture(1, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(compositeShader, "mask"), 2); //program must be active
+        glBindImageTexture(2, maskTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(compositeShader, "sourceTexture"), 3); //program must be active
+        glBindImageTexture(3, texture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+    }
+    else
+    {
+        if(doBlur)
+        {
+            smoothFilter.Process(maskTexture.glTex, smoothedMaskTexture.glTex, maskTexture.width, maskTexture.height);
+        }
+
+        glUseProgram(compositeShader);
+        SetUniforms();
+
+        glUniform1i(glGetUniformLocation(compositeShader, "textureIn"), 0); //program must be active
+        glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(compositeShader, "textureOut"), 1); //program must be active
+        glBindImageTexture(1, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(compositeShader, "mask"), 2); //program must be active
+        glBindImageTexture(2, doBlur ? smoothedMaskTexture.glTex : maskTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(compositeShader, "sourceTexture"), 3); //program must be active
+        glBindImageTexture(3, texture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+    }
+}
+
+void HardComposite::SetUniforms()
+{
+    if(maskTexture.width != imageProcessStack->width || maskTexture.height != imageProcessStack->height || !maskTexture.loaded)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR; 
+        if(maskTexture.loaded) maskTexture.Unload();
+        if(smoothedMaskTexture.loaded) smoothedMaskTexture.Unload();
+        maskTexture = GL_TextureFloat(imageProcessStack->width, imageProcessStack->height, tci);
+        smoothedMaskTexture = GL_TextureFloat(imageProcessStack->width, imageProcessStack->height, tci);
+
+        maskData.resize(maskTexture.width * maskTexture.height);
+    }
+
+    glUniform1i(glGetUniformLocation(shader, "mask"), 2); //program must be active
+    glBindImageTexture(2, maskTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+}
+
+bool HardComposite::RenderGui()
+{
+    bool changed=false;
+    selected=true;
+    
+    ImGui::Text("Mask");
+    changed |= ImGui::Checkbox("Draw Mask", &drawingMask);
+    if(drawingMask)
+    {
+        changed |= ImGui::SliderInt("Radius", &radius, 1, 25);
+        changed |= ImGui::Checkbox("Add", &adding);
+    }
+
+    ImGui::Separator();
+    filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    if(filenameChanged)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR;        
+        
+        if(texture.loaded) texture.Unload();
+        texture = GL_TextureFloat(std::string(fileName), tci);
+        
+		changed=true;
+		filenameChanged = false;
+    }
+
+    changed |= ImGui::Checkbox("Weighted Transition", &doBlur);
+    if(doBlur)
+    {
+        changed |= ImGui::DragInt("Transition Radius", &smoothFilter.size, 1, 0, 10000);
+    }
+
+    return changed;
+}
+
+
+void HardComposite::Unload()
+{
+    maskTexture.Unload();
+    texture.Unload();
+    glDeleteProgram(viewMaskShader);
+}
+
+bool HardComposite::MouseMove(float x, float y) 
+{
+    if(x<0 || !selected && !drawingMask) return false;
+
+    bool drawChanged=false;
+    glm::vec2 currentMousPos(x, y);
+    
+    if(mousePressed && previousMousPos != currentMousPos)
+    {
+        glm::vec2 diff = currentMousPos - previousMousPos;
+        float diffLength = std::ceil(glm::length(diff));
+        for(float i=0; i<diffLength; i++)
+        {
+            float t = i / diffLength;
+            glm::vec2 delta = t * diff;
+            glm::ivec2 c = previousMousPos + delta;
+            for(int ky=-radius; ky <=radius; ky++)
+            {
+                for(int kx=-radius; kx <=radius; kx++)
+                {
+                    if((ky*ky + kx+kx) < radius*radius)
+                    {
+                        glm::ivec2 coord(c.x + kx, c.y + ky);
+                        if(coord.x <0 || coord.y < 0 || coord.x >= maskTexture.width || coord.y >= maskTexture.height) continue;
+                        int inx = coord.y * maskTexture.width + coord.x;
+                        maskData[inx] = adding ? glm::vec4(1,1,1,1) : glm::vec4(0,0,0,1);
+                    }
+                }
+            }
+        }
+
+
+        glBindTexture(GL_TEXTURE_2D, maskTexture.glTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, maskTexture.width, maskTexture.height, 0, GL_RGBA, GL_FLOAT, maskData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);        
+
+        drawChanged=true;
+    }
+
+    previousMousPos = currentMousPos;
+
+    selected=false;
+
+    return drawChanged;
+}
+
+bool HardComposite::MousePressed() 
+{
+    mousePressed=true;
+    return false;
+}
+
+bool HardComposite::MouseReleased() 
+{
+    mousePressed=false;
+    return false;
+}
+
+
 //
 
 //
@@ -4535,12 +4863,11 @@ ImageLab::ImageLab() {
 void ImageLab::Load() {
     MeshShader = GL_Shader("shaders/ImageLab/Filter.vert", "", "shaders/ImageLab/Filter.frag");
     Quad = GetQuad();
-    
 
     // imageProcessStack.AddProcess(new ColorDistance(true));
     // imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Gradient.jpg"));
-    imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Tom.png"));
-    imageProcessStack.AddProcess(new AddGradient(true));
+    imageProcessStack.AddProcess(new AddImage(true, "resources\\Target.png"));
+    imageProcessStack.AddProcess(new HardComposite(true, "resources\\Source.png"));
     // imageProcessStack.AddProcess(new Dithering(true));
     // imageProcessStack.AddProcess(new FFTBlur(true));
     // imageProcessStack.AddProcess(new RegionProperties(true));
@@ -4560,8 +4887,18 @@ void ImageLab::Process()
 }
 
 void ImageLab::RenderGUI() {
-    shouldProcess=false;
-        
+    ImGuiIO &io = ImGui::GetIO();
+    glm::vec2 outputWindowMousePos(io.MousePos.x, io.MousePos.y);
+    outputWindowMousePos -= imageProcessStack.outputGuiStart;
+    if(outputWindowMousePos.x < 0 || outputWindowMousePos.x >=imageProcessStack.width || outputWindowMousePos.y <0 || outputWindowMousePos.y >=imageProcessStack.height)
+    {
+        outputWindowMousePos = glm::vec2(-1);
+    }
+    else
+    {
+        outputWindowMousePos = glm::clamp(outputWindowMousePos, glm::vec2(0), zoomLevel * glm::vec2(imageProcessStack.width, imageProcessStack.height));
+        outputWindowMousePos /= zoomLevel;
+    }
 
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -4612,30 +4949,30 @@ void ImageLab::RenderGUI() {
     imageProcessStack.outputGuiStart.x = cursor.x;
     imageProcessStack.outputGuiStart.y = cursor.y;
 
-    ImVec2 texSize((float)imageProcessStack.width, (float)imageProcessStack.height);
+    ImVec2 texSize((float)imageProcessStack.width * zoomLevel, (float)imageProcessStack.height * zoomLevel);
     ImGui::Image((ImTextureID)outTexture, texSize);
     for(int i=0; i<imageProcessStack.imageProcesses.size(); i++)
     {
         imageProcessStack.imageProcesses[i]->RenderOutputGui();
+
+        shouldProcess |= imageProcessStack.imageProcesses[i]->MouseMove(outputWindowMousePos.x, outputWindowMousePos.y);
+        if(io.MouseClicked[0])  shouldProcess |= imageProcessStack.imageProcesses[i]->MousePressed();
+        if(io.MouseReleased[0]) shouldProcess |= imageProcessStack.imageProcesses[i]->MouseReleased();
     }
+
+
     ImGui::End();
 
     ////////////////////////////////////////////////////////////////////////////////////
     //Pixel information
     ////////////////////////////////////////////////////////////////////////////////////
     ImGui::Begin("Pixel infos");
-    ImGuiIO &io = ImGui::GetIO();
-    //std::cout << io.MousePos.x << " " << io.MousePos.y << std::endl;
-    glm::vec2 mousePos(io.MousePos.x, io.MousePos.y);
-    mousePos -= imageProcessStack.outputGuiStart;
-    mousePos = glm::clamp(mousePos, glm::vec2(0), glm::vec2(imageProcessStack.width, imageProcessStack.height));
-
     glm::vec4 color(0);
 
-    int inx = (int)(mousePos.y * imageProcessStack.width + mousePos.x);
+    int inx = (int)(outputWindowMousePos.y * imageProcessStack.width + outputWindowMousePos.x);
     if(inx>=0 && inx < imageProcessStack.outputImage.size())color  = imageProcessStack.outputImage[inx];    
 
-    ImGui::Text("Mouse Position : %f, %f", mousePos.x, mousePos.y);
+    ImGui::Text("Mouse Position : %f, %f", outputWindowMousePos.x, outputWindowMousePos.y);
     ImGui::SameLine();
     ImGui::Text("Color : %f, %f, %f, %f", color.x, color.y, color.z, color.w);
     ImGui::SameLine();

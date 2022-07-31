@@ -12,11 +12,13 @@ uniform ivec2 offset;
 void main()
 {
     ivec2 pixelCoord = ivec2 ( gl_GlobalInvocationID.xy );
+    // vec3 color = imageLoad(textureIn, pixelCoord).rgb;
+    
+    //if the current pixel is less than the size of the texture to add
     if(pixelCoord.x < imageSize(textureToAdd).x && pixelCoord.y < imageSize(textureToAdd).y)
     {
-        vec3 color = imageLoad(textureIn, pixelCoord).rgb;
-        
         vec3 textureColor = multiplier * imageLoad(textureToAdd, pixelCoord).rgb;
+        vec3 color = imageLoad(textureIn, pixelCoord + offset).rgb;
         color += textureColor;
         imageStore ( textureOut , pixelCoord + offset, vec4(color, 1));
     }
