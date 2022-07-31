@@ -545,6 +545,8 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("ErrorDiffusionHalftoning")) AddProcess(new ErrorDiffusionHalftoning(true));
         if(ImGui::Button("PenDraw")) AddProcess(new PenDraw(true));
         if(ImGui::Button("HardComposite")) AddProcess(new HardComposite(true));
+        if(ImGui::Button("GaussianPyramid")) AddProcess(new GaussianPyramid(true));
+        if(ImGui::Button("LaplacianPyramid")) AddProcess(new LaplacianPyramid(true));
 
         ImGui::EndPopup();
     }
@@ -2068,10 +2070,218 @@ void MultiplyImage::Unload()
 
 //
 //------------------------------------------------------------------------
-PenDraw::PenDraw(bool enabled) : ImageProcess("PenDraw", "shaders/AddImage.glsl", enabled)
+GaussianPyramid::GaussianPyramid(bool enabled) : ImageProcess("GaussianPyramid", "shaders/CopyTexture.glsl", enabled)
+{
+    gaussianBlur.size=5;
+    gaussianBlur.sigma=5;
+
+    pyramid.resize(depth);
+    pyramidTmp.resize(depth);
+}
+
+
+void GaussianPyramid::SetUniforms()
 {
 }
 
+bool GaussianPyramid::RenderGui()
+{
+    bool changed=false;
+    depthChanged = ImGui::SliderInt("Depth", &depth, 0, 10);
+    
+    if(depthChanged)
+    {
+        pyramid.resize(depth);
+        pyramidTmp.resize(depth);
+    }
+
+    changed |= ImGui::SliderInt("Output", &output, 0, (int)depth-1);
+
+    changed |= depthChanged;
+    changed |= gaussianBlur.RenderGui();
+    return changed;
+}
+
+void GaussianPyramid::Unload()
+{
+  
+}
+
+void GaussianPyramid::CopyTexture(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+ 	glUseProgram(shader);
+	
+    //Bind sampler
+	glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureIn);
+    glUniform1i(glGetUniformLocation(shader, "gradientTexture"), 0);
+    
+    //Bind image
+    glUniform1i(glGetUniformLocation(shader, "textureOut"), 0); //program must be active
+    glBindImageTexture(0, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+     
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+	glUseProgram(0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);   
+}
+
+void GaussianPyramid::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    if(currentWidth != width || currentHeight != height || depthChanged)
+    {
+        currentWidth = width;
+        currentHeight = height;
+
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR; 
+
+        int levelWidth = width;
+        int levelHeight = height;
+        for(int i=0; i<pyramid.size(); i++)
+        {
+            if(pyramid[i].loaded) pyramid[i].Unload();
+            if(pyramidTmp[i].loaded) pyramidTmp[i].Unload();
+            pyramid[i] = GL_TextureFloat(levelWidth, levelHeight, tci);
+            pyramidTmp[i] = GL_TextureFloat(levelWidth, levelHeight, tci);
+            levelWidth/=2;
+            levelHeight/=2;
+        }
+    }
+
+
+    //Copy TextureIn into pyramid[0];
+    CopyTexture(textureIn, pyramid[0].glTex, pyramid[0].width, pyramid[0].height);
+
+    for(int i=0; i<pyramid.size()-1; i++)
+    {
+#if 1
+        gaussianBlur.Process(pyramid[i].glTex, pyramidTmp[i].glTex, pyramid[i].width, pyramid[i].height);
+        CopyTexture(pyramidTmp[i].glTex, pyramid[i+1].glTex, pyramid[i+1].width, pyramid[i+1].height);
+#else
+        CopyTexture(pyramid[i].glTex, pyramid[i+1].glTex, pyramid[i+1].width, pyramid[i+1].height);
+#endif
+    }
+
+    CopyTexture(pyramid[output].glTex, textureOut, width, height);
+}
+//
+
+//
+//------------------------------------------------------------------------
+LaplacianPyramid::LaplacianPyramid(bool enabled) : ImageProcess("LaplacianPyramid", "shaders/SubtractTexture.glsl", enabled)
+{
+    CreateComputeShader("shaders/AddTexture.glsl", &addTextureShader);
+    CreateComputeShader("shaders/ClearTexture.glsl", &clearTextureShader);
+}
+
+
+void LaplacianPyramid::SetUniforms()
+{
+}
+
+bool LaplacianPyramid::RenderGui()
+{
+    bool changed=false;
+
+    changed |= gaussianPyramid.RenderGui();
+
+    ImGui::Separator();
+    changed |= ImGui::SliderInt("Laplacian Output", &output, 0, gaussianPyramid.depth-1);
+    changed |= ImGui::Checkbox("Output Reconstruction", &outputReconstruction);
+    return changed;
+}
+
+void LaplacianPyramid::Unload()
+{
+  
+}
+
+void LaplacianPyramid::SubtractTexture(GLuint textureA, GLuint textureB, int width, int height)
+{
+ 	glUseProgram(shader);
+	
+    //Bind image A
+    glUniform1i(glGetUniformLocation(shader, "textureA"), 0); //program must be active
+    glBindImageTexture(0, textureA, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+     
+    //Bind sampler
+	glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureB);
+    glUniform1i(glGetUniformLocation(shader, "textureB"), 0);
+    
+     
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+	glUseProgram(0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);   
+}
+
+void LaplacianPyramid::AddTexture(GLuint textureA, GLuint textureB, int width, int height)
+{
+ 	glUseProgram(addTextureShader);
+	
+    //Bind image A
+    glUniform1i(glGetUniformLocation(addTextureShader, "textureA"), 0); //program must be active
+    glBindImageTexture(0, textureA, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+     
+    //Bind sampler
+	glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureB);
+    glUniform1i(glGetUniformLocation(addTextureShader, "textureB"), 0);
+    
+     
+    glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+	glUseProgram(0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);   
+}
+
+void LaplacianPyramid::ClearTexture(GLuint texture, int width, int height)
+{
+    glUseProgram(clearTextureShader);
+    glUniform1i(glGetUniformLocation(clearTextureShader, "textureOut"), 0); //program must be active
+    glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    glDispatchCompute(width/32+1, height/32+1, 1);
+    glUseProgram(0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);     
+}
+
+void LaplacianPyramid::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    gaussianPyramid.Process(textureIn, textureOut, width, height);
+
+    for(int i=0; i<gaussianPyramid.pyramid.size()-1; i++)
+    {
+        SubtractTexture(gaussianPyramid.pyramid[i].glTex, 
+                        gaussianPyramid.pyramid[i+1].glTex, 
+                        gaussianPyramid.pyramid[i].width, 
+                        gaussianPyramid.pyramid[i].height);
+    }
+    
+
+    if(outputReconstruction)
+    {
+        ClearTexture(textureOut, width, height);
+        for(int i=gaussianPyramid.depth-1; i>=0; i--)
+        {
+            AddTexture(textureOut, gaussianPyramid.pyramid[i].glTex, width, height);
+        }
+    }
+    else
+    {
+        gaussianPyramid.CopyTexture(gaussianPyramid.pyramid[output].glTex, textureOut, width, height);
+    }
+
+
+}
+//
+
+//
+//------------------------------------------------------------------------
+PenDraw::PenDraw(bool enabled) : ImageProcess("PenDraw", "shaders/AddImage.glsl", enabled)
+{
+}
+	
 
 void PenDraw::SetUniforms()
 {
@@ -4867,7 +5077,7 @@ void ImageLab::Load() {
     // imageProcessStack.AddProcess(new ColorDistance(true));
     // imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Gradient.jpg"));
     imageProcessStack.AddProcess(new AddImage(true, "resources\\Target.png"));
-    imageProcessStack.AddProcess(new HardComposite(true, "resources\\Source.png"));
+    imageProcessStack.AddProcess(new LaplacianPyramid(true));
     // imageProcessStack.AddProcess(new Dithering(true));
     // imageProcessStack.AddProcess(new FFTBlur(true));
     // imageProcessStack.AddProcess(new RegionProperties(true));

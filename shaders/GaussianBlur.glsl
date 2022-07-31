@@ -29,10 +29,10 @@ void main()
             int flatInx = y * size + x;
 
             ivec2 samplePos = ivec2(xx, yy);
-            if(samplePos.x < 0) samplePos.x=0;
-            if(samplePos.y < 0) samplePos.y=0;
-            if(samplePos.x > imgSize.x-1) samplePos.x=imgSize.x-1;
-            if(samplePos.y > imgSize.y-1) samplePos.y=imgSize.y-1;
+            if(samplePos.x < 0) continue;
+            if(samplePos.y < 0) continue;
+            if(samplePos.x > imgSize.x-1) continue;
+            if(samplePos.y > imgSize.y-1) continue;
 
             float weight = 1.0f / float(size * size);
             weight = kernel[flatInx];

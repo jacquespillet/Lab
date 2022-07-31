@@ -403,6 +403,47 @@ struct MultiplyImage : public ImageProcess
     float multiplier=1;
 };
 
+struct GaussianPyramid : public ImageProcess
+{
+    GaussianPyramid(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+    void CopyTexture(GLuint textureIn, GLuint textureOut, int width, int height);
+    int depth=5;
+    std::vector<GL_TextureFloat> pyramid;
+    std::vector<GL_TextureFloat> pyramidTmp;
+    // GL_TextureFloat reconstructed;
+    int currentWidth=-1;
+    int currentHeight=-1;
+    GaussianBlur gaussianBlur;
+
+    bool depthChanged;
+
+    int output=0;
+};
+
+struct LaplacianPyramid : public ImageProcess
+{
+    LaplacianPyramid(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+    void SubtractTexture(GLuint textureA, GLuint textureB, int width, int height);
+    void AddTexture(GLuint textureA, GLuint textureB, int width, int height);
+    void ClearTexture(GLuint textureA, int width, int height);
+
+    GaussianPyramid gaussianPyramid;
+
+    GLint addTextureShader;
+    GLint clearTextureShader;
+    
+    bool outputReconstruction=false;
+    int output=0;
+};
+
 struct PenDraw : public ImageProcess
 {
     PenDraw(bool enabled=true);
