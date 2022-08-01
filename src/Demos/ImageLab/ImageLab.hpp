@@ -102,6 +102,10 @@ struct ImageProcessStack
 
     int width = 1024;
     int height = 900;
+
+    float zoomLevel=1;
+    // int width = 512;
+    // int height = 512;
 };
 
 
@@ -509,6 +513,52 @@ struct HardComposite : public ImageProcess
     bool mousePressed=false;
     glm::vec2 previousMousPos = glm::vec2(-1);
 
+};
+
+struct PatchInpainting : public ImageProcess
+{
+    PatchInpainting(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Unload() override;
+    
+    virtual bool MouseMove(float x, float y) override;
+    virtual bool MousePressed() override;
+    virtual bool MouseReleased() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+    bool RenderOutputGui() override;
+    
+
+    void PatchInpainting::ExtractPatch(std::vector<glm::vec4> &image, int imageWidth, int imageHeight, glm::ivec2 position, int size, std::vector<glm::vec4>& patch);
+    float ComparePatches(std::vector<glm::vec4> &patch1, std::vector<glm::vec4> &patch2);
+    std::vector<glm::ivec2> CalculateContour(int width, int height);
+
+    //Mask
+    GL_TextureFloat maskTexture;
+    std::vector<glm::vec4> maskData;
+    GLint viewMaskShader;
+    bool drawingMask=false;
+    bool adding=true;
+
+    bool selected=false;
+
+    bool mousePressed=false;
+    glm::vec2 previousMousPos = glm::vec2(-1);
+
+    int radius = 1;
+
+    bool iterate=false;
+    int iteration=0;
+    int subIteration=0;
+    glm::ivec2 patchCenter;
+    int patchSize=4;
+
+    bool searchWholeImage=false;
+    glm::ivec2 searchWindowStart = glm::ivec2(200, 100);
+    glm::ivec2 searchWindowEnd = glm::ivec2(300, 153);
+
+    std::vector<glm::ivec2> points;
+    std::vector<glm::vec4> textureData;
 };
 
 struct MultiResComposite : public ImageProcess
@@ -1027,5 +1077,4 @@ private:
 
     bool firstFrame=true;
 
-    float zoomLevel=1;
 };

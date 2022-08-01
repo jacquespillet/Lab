@@ -15,6 +15,7 @@
 #include <stack>
 
 #define MODE 2
+#define DEBUG_INPAINTING 0
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2610,6 +2611,540 @@ bool HardComposite::MouseReleased()
     return false;
 }
 
+//
+//------------------------------------------------------------------------
+int GetStartIndex(glm::ivec2 b, glm::ivec2 c)
+{
+    glm::ivec2 diff = c - b;
+    if(diff == glm::ivec2(-1, 0)) return 0; //0:Left 
+    if(diff == glm::ivec2(-1,-1)) return 1; //1:top left
+    if(diff == glm::ivec2( 0,-1)) return 2; //2:top
+    if(diff == glm::ivec2( 1,-1)) return 3; //3:top right
+    if(diff == glm::ivec2( 1, 0)) return 4; //4:right
+    if(diff == glm::ivec2( 1, 1)) return 5; //5:bottom right
+    if(diff == glm::ivec2( 0, 1)) return 6; //6:bottom
+    if(diff == glm::ivec2(-1, 1)) return 7; //7:bottom left
+    return 0;
+}
+
+std::vector<glm::ivec2> PatchInpainting::CalculateContour(int width, int height)
+{
+	std::vector<glm::ivec2> result;
+
+    std::vector<glm::ivec2> directions = 
+    {
+        glm::ivec2(-1, 0),//0:Left 
+        glm::ivec2(-1,-1),//1:top left
+        glm::ivec2( 0,-1),//2:top
+        glm::ivec2( 1,-1),//3:top right
+        glm::ivec2( 1, 0),//4:right
+        glm::ivec2( 1, 1),//5:bottom right
+        glm::ivec2( 0, 1),//6:bottom
+        glm::ivec2(-1, 1),//7:bottom left
+    };
+
+    struct point
+    {
+        glm::ivec2 b;
+        glm::ivec2 c;
+    };
+    std::vector<point> contourPoints;
+
+    bool shouldBreak = false;
+    for(int y=0; y<height; y++)
+    {
+        for(int x=0; x<width; x++)
+        {
+            if(maskData[y * width + x].x != 0)
+            {
+                contourPoints.push_back(
+                    {
+                        glm::ivec2(x, y),
+                        glm::ivec2(x-1, y)
+                    }
+                );
+                shouldBreak = true;
+                break;
+            }
+        }
+        if (shouldBreak)break;
+    }
+    
+	if (contourPoints.size() > 0)
+	{
+		//Find the ordered list of contourPoints
+		point *currentPoint = &contourPoints[contourPoints.size()-1];
+		point firstPoint = *currentPoint;
+		do {
+			glm::ivec2 prevCoord;
+			int startInx = GetStartIndex(currentPoint->b, currentPoint->c);
+        
+			for(int i=startInx; i<startInx + directions.size(); i++)
+			{
+				int dirInx = i % directions.size();
+
+				glm::ivec2 checkCoord = currentPoint->b + directions[dirInx];
+				if(checkCoord.x <=0 || checkCoord.y <=0 || checkCoord.x >= width-1 || checkCoord.y >= height-1) continue;
+				float checkValue = maskData[checkCoord.y * width + checkCoord.x].x;
+				if(checkValue>0)
+				{
+					point newPoint = 
+					{
+						checkCoord,
+						prevCoord,
+					};
+					contourPoints.push_back(newPoint);
+					break;
+				}
+				prevCoord = checkCoord;
+			}
+
+			currentPoint = &contourPoints[contourPoints.size()-1];
+		}
+		while(currentPoint->b != firstPoint.b && currentPoint->c != firstPoint.c);
+
+		//Remove duplicate point
+		contourPoints.erase(contourPoints.begin() + contourPoints.size()-1);
+    
+		result.resize(contourPoints.size());
+		for(int i=0; i<contourPoints.size(); i++)
+		{
+			result[i] = contourPoints[i].b;
+		}
+	}
+    
+    if(result.size()==0) //Return all the points in the mask
+    {
+        for(int y=0; y<height; y++)
+        {
+            for(int x=0; x<width; x++)
+            {
+                if(maskData[y * width + x].x>0) result.push_back(glm::ivec2(x, y));
+            }
+        }
+    }
+	return result;
+}
+
+PatchInpainting::PatchInpainting(bool enabled) : ImageProcess("PatchInpainting", "", enabled)
+{
+    CreateComputeShader("shaders/HardCompositeViewMask.glsl", &viewMaskShader); 
+}
+
+void PatchInpainting::ExtractPatch(std::vector<glm::vec4> &image, int imageWidth, int imageHeight, glm::ivec2 position, int size, std::vector<glm::vec4>& patch)
+{
+    int totalSize = (size*2+1) * (size*2+1);
+    if(patch.size() != totalSize) patch.resize(totalSize);
+    glm::ivec2 k;
+    int i=0;
+    for(k.y=-size; k.y<=size; k.y++)
+    {
+        for(k.x=-size; k.x<=size; k.x++)
+        {                
+            glm::ivec2 p = position + k;
+            int inx = p.y * imageWidth + p.x;
+            if(p.x >=0 && p.y >=0 && p.x < imageWidth-1 && p.y < imageHeight-1)
+            {
+                patch[i] = (image[inx]);
+            }
+            else
+            {
+                patch[i] = glm::vec4(10000);
+            }
+
+            i++;
+        }
+    }   
+}
+
+float PatchInpainting::ComparePatches(std::vector<glm::vec4> &patch1, std::vector<glm::vec4> &patch2)
+{
+    float distance =0;
+    for(int i=0; i<patch1.size(); i++)
+    {
+        distance += glm::distance2(glm::vec3(patch1[i]), glm::vec3(patch2[i]));
+    }
+    return distance;
+}
+
+void PatchInpainting::Process(GLuint textureIn, GLuint textureOut, int width, int height)
+{
+    
+    if(maskTexture.width != imageProcessStack->width || maskTexture.height != imageProcessStack->height || !maskTexture.loaded)
+    {
+        TextureCreateInfo tci = {};
+        tci.generateMipmaps =false;
+        tci.minFilter = GL_LINEAR;
+        tci.magFilter = GL_LINEAR; 
+        if(maskTexture.loaded) maskTexture.Unload();
+        maskTexture = GL_TextureFloat(imageProcessStack->width, imageProcessStack->height, tci);
+
+        maskData.resize(maskTexture.width * maskTexture.height);
+    }
+    
+    if(drawingMask)
+    {
+        glUseProgram(viewMaskShader);
+        SetUniforms();
+
+        glUniform1i(glGetUniformLocation(viewMaskShader, "textureIn"), 0); //program must be active
+        glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(viewMaskShader, "textureOut"), 1); //program must be active
+        glBindImageTexture(1, textureOut, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glUniform1i(glGetUniformLocation(viewMaskShader, "mask"), 2); //program must be active
+        glBindImageTexture(2, maskTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        
+        glDispatchCompute((width / 32) + 1, (height / 32) + 1, 1);
+        glUseProgram(0);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+    }
+    else
+    {
+        
+        if(iteration==0)
+        {
+            textureData.resize(width * height);
+            glBindTexture(GL_TEXTURE_2D, textureIn);
+            glGetTexImage (GL_TEXTURE_2D,
+                            0,
+                            GL_RGBA, // GL will convert to this format
+                            GL_FLOAT,   // Using this data type per-pixel
+                            textureData.data());
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+#if DEBUG_INPAINTING
+        std::vector<glm::vec4> a = textureData;
+#endif
+        //Calculate contour        
+        points = CalculateContour(width, height);
+        
+        int totalSize = (patchSize*2+1) * (patchSize*2+1);
+        
+        //Calculate the priorities of each boundary point
+        if (points.size() > 0)
+        {
+            int maxInx=0;
+            float highestPriority = 0;
+            float pixelConfidence=0;
+            for(int i=0; i<points.size(); i++)
+            {
+                //Calculate confidence
+                float confidence = 0;
+                glm::ivec2 k;
+                for(k.y=-patchSize; k.y<=patchSize; k.y++)
+                {
+                    for(k.x=-patchSize; k.x<=patchSize; k.x++)
+                    {
+                        glm::ivec2 c = points[i] + k;
+                        int inx = c.y * width + c.x;
+                        confidence += maskData[inx].y; //Confidence is stored in y. starts with 1
+                    }
+                }
+                confidence /= (float)(totalSize);
+
+                //Calculate gradient
+                float sobelKernel[9] = { -1, -2, -1, 
+                                      0,  0,  0,
+                                      1,  2,  1};
+                float gradX=0;
+                float gradY=0;
+				int ky = 0;
+                for(k.y=-1; k.y<=1; k.y++)
+                {
+					int kx = 0;
+                    for(k.x=-1; k.x<=1; k.x++)
+                    {
+                        glm::ivec2 c = points[i] + k;
+                        int inx = c.y * width + c.x;
+                        
+                        float weightX = sobelKernel[ky * 3 + kx];
+                        float weightY = sobelKernel[kx * 3 + ky];
+
+                        glm::vec4 pixelColor = textureData[inx];
+                        float grayScale = (pixelColor.r + pixelColor.g + pixelColor.b) * 0.3333f;
+                        gradX += grayScale * weightX;         
+                        gradY += grayScale * weightY;    
+                        
+                        kx++;                    
+                    }
+                    ky++;
+                }
+
+                float data = glm::length(glm::vec2(gradX, gradY));
+                // data=1;
+#if DEBUG_INPAINTING    
+                // a[points[i].y * width + points[i].x] = glm::vec4(data, data, data,1);
+#endif
+                // confidence=1;
+                float priority = confidence * data;
+                if(priority>highestPriority)
+                {
+                    pixelConfidence = confidence;
+                    highestPriority=priority;
+                    maxInx=i;
+                }
+            }
+
+            patchCenter = points[maxInx];
+            // std::cout << "Picked Point "<< glm::to_string(patchCenter) << std::endl;
+
+            //Build the patch that we need to find elsewhere in the image
+            std::vector<glm::vec4> patchToCompare;
+            ExtractPatch(
+                textureData,
+                width, height, 
+                patchCenter, patchSize,
+                patchToCompare
+            );
+
+            glm::ivec2 loopStart(
+                searchWholeImage ? 0 : searchWindowStart.x,
+                searchWholeImage ? 0 : searchWindowStart.y
+            );
+            glm::ivec2 loopEnd(
+                searchWholeImage ? width :  searchWindowEnd.x,
+                searchWholeImage ? height : searchWindowEnd.y            
+            );
+
+            std::vector<glm::vec4> currentPatch;
+            //Look for the patch in the image
+            float minDifference = 1e30f;
+            std::vector<glm::vec4> newPatch;
+            for(int y=loopStart.y; y<loopEnd.y; y+=patchSize)
+            {
+                for(int x=loopStart.x; x<loopEnd.x; x+=patchSize)
+                {
+                    glm::ivec2 c(x, y);
+                    //Skip if we're at the patch that we're looking for
+                    if(c == patchCenter) continue;
+
+                    //We  check if there is unknown pixels into the patch and discard it if yes
+                    bool shouldDiscard=false;
+                    for(int ky=-patchSize; ky<=patchSize; ky++)
+                    {
+                        for(int kx=-patchSize; kx<=patchSize; kx++)
+                        {                
+                            glm::ivec2 p = c + glm::ivec2(kx, ky);
+                            int inx = p.y * width + p.x;
+                            if(p.x >=0 && p.y >=0 && p.x < width-1 && p.y < height-1)
+                            {
+                                if(maskData[inx].x > 0) 
+                                {
+                                    shouldDiscard=true;
+                                    break;
+                                }
+                            }
+                        }
+                        if(shouldDiscard) break;
+                    }   
+                    if(shouldDiscard) continue;
+
+                    
+                    ExtractPatch(
+                        textureData,
+                        width, height, 
+                        c, patchSize,
+                        currentPatch
+                    );
+                    float difference = ComparePatches(currentPatch, patchToCompare);
+                    
+
+                    if(difference < minDifference)
+                    {
+                        minDifference = difference;
+                        newPatch = currentPatch;
+                    }
+                }
+            }
+
+			if (newPatch.size() > 0)
+			{
+				//Replace the current patch with the found patch
+				int i=0;
+				for(int y=-patchSize; y<=patchSize; y++)
+				{
+					for(int x=-patchSize; x<=patchSize; x++)
+					{
+						glm::ivec2 outputCoord = patchCenter + glm::ivec2(x, y);
+						int outputInx = outputCoord.y * width + outputCoord.x;
+						textureData[outputInx] = newPatch[i];
+						// maskData[outputInx].y = pixelConfidence;
+						i++;
+					}
+				}
+				maskData[patchCenter.y * width + patchCenter.x].x =0;
+				iteration++;
+			}
+
+#if DEBUG_INPAINTING
+            for(int k=0; k<maskData.size(); k++)
+            {
+                if(maskData[k].x >0) a[k] += glm::vec4(0,0.5, 0.5, 0);
+            }   
+            a[patchCenter.y * width + patchCenter.x] = glm::vec4(0,1,0,1);
+            glBindTexture(GL_TEXTURE_2D, textureOut);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, a.data());
+            glBindTexture(GL_TEXTURE_2D, 0);
+#endif
+        }
+
+#if !DEBUG_INPAINTING
+        glBindTexture(GL_TEXTURE_2D, textureOut);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, textureData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+#endif
+    } 
+}
+
+void PatchInpainting::SetUniforms()
+{
+    glUniform1i(glGetUniformLocation(shader, "mask"), 2); //program must be active
+    glBindImageTexture(2, maskTexture.glTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+}
+
+bool PatchInpainting::RenderGui()
+{
+    bool changed=false;
+    selected=true;
+    
+    ImGui::Text("Mask");
+    ImGui::Checkbox("Draw Mask", &drawingMask);
+    if(drawingMask)
+    {
+        changed |= ImGui::Checkbox("Add", &adding);
+        changed |= ImGui::SliderInt("Radius", &radius, 1, 20);
+
+        if(ImGui::Button("Clear"))
+        {
+            std::fill(maskData.begin(), maskData.end(), glm::vec4(0,0,0,1));
+            changed=true;
+
+            glBindTexture(GL_TEXTURE_2D, maskTexture.glTex);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, maskTexture.width, maskTexture.height, 0, GL_RGBA, GL_FLOAT, maskData.data());
+            glBindTexture(GL_TEXTURE_2D, 0);            
+        }
+    }
+
+    ImGui::Separator();
+
+    // iterate=false;
+    if(ImGui::Button("Iterate"))
+    {
+        iterate=!iterate;
+        // iterate=true;
+    }
+
+    ImGui::SliderInt("Patch Size", &patchSize, 1, 10);
+
+    ImGui::Checkbox("Search Whole Image", &searchWholeImage);
+    if(!searchWholeImage)
+    {
+        ImGui::DragIntRange2("X", &searchWindowStart.x, &searchWindowEnd.x);
+        ImGui::DragIntRange2("Y", &searchWindowStart.y, &searchWindowEnd.y);
+    }
+
+    if(iterate) changed=true;
+    
+
+
+    return changed;
+}
+
+bool PatchInpainting::RenderOutputGui()
+{
+    bool changed=false;
+    // float width = ImGui::GetWindowContentRegionWidth();
+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    
+    glm::vec2 margin = imageProcessStack->outputGuiStart;
+    
+    glm::vec2 pos = (searchWindowEnd + searchWindowStart) / 2;
+    glm::vec2 size = (searchWindowEnd - searchWindowStart);
+
+    pos *= imageProcessStack->zoomLevel;
+
+    glm::vec2 newStart = pos - size*0.5f;
+    glm::vec2 newEnd =   pos + size*0.5f;
+
+    glm::vec2 start = glm::vec2(newStart.x + margin.x, newStart.y + margin.y) * imageProcessStack->zoomLevel;
+    glm::vec2 end = glm::vec2(newEnd.x   + margin.x, newEnd.y   + margin.y) * imageProcessStack->zoomLevel;
+    
+    drawList->AddRect(
+        ImVec2(start.x, start.y), 
+        ImVec2(end.x, end.y),
+        IM_COL32(0,0,255,255)
+    );
+
+    return changed;    
+}
+
+void PatchInpainting::Unload()
+{
+    maskTexture.Unload();
+    glDeleteProgram(viewMaskShader);
+}
+
+bool PatchInpainting::MouseMove(float x, float y) 
+{
+    if(x<0 || !selected || !drawingMask) return false;
+
+    
+    bool drawChanged=false;
+    glm::vec2 currentMousPos(x, y);
+    
+    if(mousePressed && previousMousPos != currentMousPos)
+    {
+        glm::vec2 diff = currentMousPos - previousMousPos;
+        float diffLength = std::ceil(glm::length(diff));
+        for(float i=0; i<diffLength; i++)
+        {
+            float t = i / diffLength;
+            glm::vec2 delta = t * diff;
+            glm::ivec2 c = previousMousPos + delta;
+
+            for(int ky=-radius; ky <=radius; ky++)
+            {
+                for(int kx=-radius; kx <=radius; kx++)
+                {
+                    if((ky*ky + kx+kx) < radius*radius)
+                    {
+                        glm::ivec2 coord(c.x + kx, c.y + ky);
+                        if(coord.x <0 || coord.y < 0 || coord.x >= maskTexture.width || coord.y >= maskTexture.height) continue;
+                        int inx = coord.y * maskTexture.width + coord.x;
+                        maskData[inx] = adding ? glm::vec4(1,1,0,0) : glm::vec4(0,0,0,1);
+                    }
+                }
+            }
+        }
+
+        glBindTexture(GL_TEXTURE_2D, maskTexture.glTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, maskTexture.width, maskTexture.height, 0, GL_RGBA, GL_FLOAT, maskData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);        
+
+        drawChanged=true;
+    }
+
+    previousMousPos = currentMousPos;
+
+    selected=false;
+
+    return drawChanged;
+}
+
+bool PatchInpainting::MousePressed() 
+{
+    mousePressed=true;
+    return false;
+}
+
+bool PatchInpainting::MouseReleased() 
+{
+    mousePressed=false;
+    return false;
+}
+
 
 //
 //
@@ -2618,6 +3153,16 @@ MultiResComposite::MultiResComposite(bool enabled, char* newFileName) : ImagePro
 {
     CreateComputeShader("shaders/HardCompositeViewMask.glsl", &viewMaskShader);
     
+    float sigma = 5;
+    int size = 9;
+    
+    maskPyramid.gaussianBlur.sigma = sigma;
+    maskPyramid.gaussianBlur.size = size;
+    sourcePyramid.gaussianPyramid.gaussianBlur.sigma = sigma;
+    sourcePyramid.gaussianPyramid.gaussianBlur.size = size;
+    destPyramid.gaussianPyramid.gaussianBlur.sigma = sigma;
+    destPyramid.gaussianPyramid.gaussianBlur.size = size;
+
     strcpy(this->fileName, newFileName);
     if(strcmp(this->fileName, "")!=0) 
     {
@@ -5308,8 +5853,11 @@ void ImageLab::Load() {
 
     // imageProcessStack.AddProcess(new ColorDistance(true));
     // imageProcessStack.AddProcess(new AddImage(true, "D:\\Boulot\\2022\\Lab\\resources\\Gradient.jpg"));
-    imageProcessStack.AddProcess(new AddImage(true, "resources\\Target.png"));
-    imageProcessStack.AddProcess(new MultiResComposite(true, "resources\\Source.png"));
+    // imageProcessStack.AddProcess(new AddImage(true, "resources\\StripesHQ.png"));
+    // imageProcessStack.AddProcess(new AddImage(true, "resources\\Stripes.png"));
+    // imageProcessStack.AddProcess(new AddImage(true, "resources\\StripesHoriz.png"));
+    imageProcessStack.AddProcess(new AddImage(true, "resources\\Tom_Inpainting.PNG"));
+    imageProcessStack.AddProcess(new PatchInpainting(true));
     // imageProcessStack.AddProcess(new Dithering(true));
     // imageProcessStack.AddProcess(new FFTBlur(true));
     // imageProcessStack.AddProcess(new RegionProperties(true));
@@ -5330,18 +5878,7 @@ void ImageLab::Process()
 
 void ImageLab::RenderGUI() {
     ImGuiIO &io = ImGui::GetIO();
-    glm::vec2 outputWindowMousePos(io.MousePos.x, io.MousePos.y);
-    outputWindowMousePos -= imageProcessStack.outputGuiStart;
-    if(outputWindowMousePos.x < 0 || outputWindowMousePos.x >=imageProcessStack.width || outputWindowMousePos.y <0 || outputWindowMousePos.y >=imageProcessStack.height)
-    {
-        outputWindowMousePos = glm::vec2(-1);
-    }
-    else
-    {
-        outputWindowMousePos = glm::clamp(outputWindowMousePos, glm::vec2(0), zoomLevel * glm::vec2(imageProcessStack.width, imageProcessStack.height));
-        outputWindowMousePos /= zoomLevel;
-    }
-
+    
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -5388,10 +5925,30 @@ void ImageLab::RenderGUI() {
     ////////////////////////////////////////////////////////////////////////////////////
     ImGui::Begin("Output");
     ImVec2 cursor = ImGui::GetCursorScreenPos();
-    imageProcessStack.outputGuiStart.x = cursor.x;
-    imageProcessStack.outputGuiStart.y = cursor.y;
+    imageProcessStack.outputGuiStart.x = cursor.x + ImGui::GetScrollX();
+    imageProcessStack.outputGuiStart.y = cursor.y + ImGui::GetScrollY();
 
-    ImVec2 texSize((float)imageProcessStack.width * zoomLevel, (float)imageProcessStack.height * zoomLevel);
+    //Calculate mouse position in this space
+    glm::vec2 outputWindowMousePos(io.MousePos.x, io.MousePos.y);
+    outputWindowMousePos -= imageProcessStack.outputGuiStart - glm::vec2(ImGui::GetScrollX(), ImGui::GetScrollY());
+    std::cout << ImGui::GetScrollY() << std::endl;
+    if(outputWindowMousePos.x < 0 || 
+      outputWindowMousePos.x >=imageProcessStack.width * imageProcessStack.zoomLevel || 
+      outputWindowMousePos.y <0 || 
+      outputWindowMousePos.y >=imageProcessStack.height * imageProcessStack.zoomLevel ||
+      io.MousePos.x < imageProcessStack.outputGuiStart.x
+      )
+    {
+        outputWindowMousePos = glm::vec2(-1);
+    }
+    else
+    {
+        outputWindowMousePos = glm::clamp(outputWindowMousePos, glm::vec2(0), imageProcessStack.zoomLevel * glm::vec2(imageProcessStack.width, imageProcessStack.height));
+        outputWindowMousePos /= imageProcessStack.zoomLevel;
+    }
+
+
+    ImVec2 texSize((float)imageProcessStack.width * imageProcessStack.zoomLevel, (float)imageProcessStack.height * imageProcessStack.zoomLevel);
     ImGui::Image((ImTextureID)outTexture, texSize);
     for(int i=0; i<imageProcessStack.imageProcesses.size(); i++)
     {
@@ -5419,6 +5976,9 @@ void ImageLab::RenderGUI() {
     ImGui::Text("Color : %f, %f, %f, %f", color.x, color.y, color.z, color.w);
     ImGui::SameLine();
     ImGui::ColorButton("C", ImVec4(color.r, color.g, color.b, color.a));
+
+    ImGui::SameLine();
+    ImGui::DragFloat("Zoom", &imageProcessStack.zoomLevel, 0.01f, 0.1f, 100000);
 
     ImGui::End();
     
