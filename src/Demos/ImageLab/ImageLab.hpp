@@ -523,25 +523,28 @@ struct SeamCarvingResize : public ImageProcess
     void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
 
     float SeamCarvingResize::CalculateCostAt(glm::ivec2 position, std::vector<glm::vec4> &image, int width, int height);
+    
     std::vector<glm::vec4> originalData;
     std::vector<glm::vec4> imageData;
     std::vector<glm::vec4> debugData;
+    
+    std::vector<float> costs;
+    std::vector<int> directions;
+    
+    std::vector<int> onSeam;
 
     struct Seam
     {
         std::vector<glm::ivec2> points;
     };
-    std::vector<Seam> downSizeSeams;
-    std::vector<bool> downSizeSeamsDone;
-    std::vector<Seam> upSizeSeams;
-    std::vector<bool> upSizeSeamsDone;
+    std::vector<Seam> seams;
 
     bool debug=false;
 
     int numPerIterations=1;
     int iterations=0;
 
-    int resizedWidth;
+    // int resizedWidth;
 
     bool increase=false;
 };
