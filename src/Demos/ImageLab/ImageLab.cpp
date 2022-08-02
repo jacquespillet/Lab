@@ -2638,11 +2638,10 @@ float SeamCarvingResize::CalculateCostAt(glm::ivec2 position, std::vector<glm::v
     
     float currentGrayScale = Color2GrayScale(image[inx]);
     float nextXGrayScale  =  Color2GrayScale(nextX);
-    float nextYGrayScale  =  Color2GrayScale(nextY);
+    float nextYGrayScale  =  Color2GrayScale(nextY); 
 
     float gradX = nextXGrayScale - currentGrayScale;
     float gradY = nextYGrayScale - currentGrayScale;
-    
 
     return (gradX * gradX + gradY * gradY);
 }
@@ -2656,6 +2655,7 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
         
         imageData.resize(width * height, glm::vec4(0));
 		originalData.resize(width * height, glm::vec4(0));
+		gradient.resize(width * height, 0);
         debugData.resize(width * height);
         onSeam.resize(width * height);
         costs.resize(width*height, 0);
@@ -2675,11 +2675,21 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                         originalData.data());
         glBindTexture(GL_TEXTURE_2D, 0);
         
-        onSeam = std::vector<int>(width * height, 0);
+        onSeam = std::vector<glm::ivec2>(width * height, glm::ivec2(0));
+        
+        for(int y=0; y<height; y++)
+        {
+            for(int x=0; x<width; x++)
+            {
+                int inx = y * width + x;
+                gradient[inx] = CalculateCostAt(glm::ivec2(x, y), originalData, width, height);
+            }
+        }
     }
     //Set the image Data to be original data at start
     imageData = originalData;   
     
+
     //If debug, read back all the time.
     if(debug)
     {
@@ -2700,8 +2710,8 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
         {
             int y=0;
             int inx = y * width + x; 
-            costs[inx] = CalculateCostAt(glm::ivec2(x, y), originalData, width, height);
-            if(onSeam[inx]) costs[inx] = 10000;
+            costs[inx] = gradient[inx];
+            if(onSeam[inx].x || onSeam[inx].y) costs[inx] = 10;
         }
 
         //Go down, and accumulate the costs
@@ -2710,7 +2720,7 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
             for(int x=0; x<width; x++)
             {
                 int inx = y * width + x; 
-                costs[inx] = CalculateCostAt(glm::ivec2(x, y), originalData, width, height);
+                costs[inx] = gradient[inx];
                 
                 float topCost = costs[inx-width];
                 float topLeftCost = costs[inx-width - 1];
@@ -2734,7 +2744,7 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                     directions[inx] = 1;
                 }
 
-                if(onSeam[inx]) costs[inx] = 10000;
+                if(onSeam[inx].x || onSeam[inx].y) costs[inx] += 10;
             }
         }
 
@@ -2746,7 +2756,7 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
             int y = height-1;
             int inx = y * width + x;
             float cost = costs[inx];
-            if(cost < lowestCost && !onSeam[x])
+            if(cost < lowestCost)
             {
                 lowestCost=cost;
                 lowestInx=glm::ivec2(x, y);
@@ -2762,7 +2772,9 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
         int added=0;
         while(true)
         {
-            onSeam[currentPoint.y * width + currentPoint.x] = increase ? 2 : 1;
+            onSeam[currentPoint.y * width + currentPoint.x].y++;
+            onSeam[currentPoint.y * width + currentPoint.x].x++;
+
             seams[seams.size()-1].points[added++] = (currentPoint);
             int direction = directions[currentPoint.y * width + currentPoint.x];
             currentPoint = glm::ivec2(currentPoint.x + direction, currentPoint.y-1);
@@ -2777,8 +2789,8 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
     {
         for(int i=0; i<onSeam.size(); i++)
         {
-            if(onSeam[i]==1) debugData[i] = glm::vec4(1,0,0,1);
-            else if(onSeam[i]==2) debugData[i] = glm::vec4(0,1,0,1);
+            if(onSeam[i].x>0) debugData[i] = glm::vec4(1,0,0,1);
+            else if(onSeam[i].y>0) debugData[i] = glm::vec4(0,1,0,1);
         }
     }    
     else
@@ -2791,13 +2803,13 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
             for(int x = 0; x<width; x++)
             {
                 int inx = y * width + x;
-                if(onSeam[inx]==1)
+                if(onSeam[inx].x>0)
                 { 
                     size_t shiftSize = (width - x - 1) * sizeof(glm::vec4);
                     memcpy((void*)&imageData[inx], (void*)&imageData[inx+1], shiftSize);
-                    resizedWidth--;
+                    resizedWidth-=onSeam[inx].x;
                 }
-                if(onSeam[inx]==2)
+                if(onSeam[inx].y > 0)
                 {
                     glm::vec4 pixValue = (imageData[inx-1] + imageData[inx+1]) * 0.5;
 
@@ -2807,7 +2819,7 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                     memcpy((void*)&imageData[inx+1], (void*)&memToCopy[0], shiftSize);
                     
                     imageData[inx] = pixValue;
-                    resizedWidth++;
+                    resizedWidth+=onSeam[inx].y;
                 }
             }
             for(int x=resizedWidth; x<width; x++)
