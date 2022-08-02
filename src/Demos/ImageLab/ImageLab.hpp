@@ -100,12 +100,12 @@ struct ImageProcessStack
 
     bool changed=false;
 
-    int width = 1024;
-    int height = 900;
-
+    // int width = 1024;
+    // int height = 900;
+    
     float zoomLevel=1;
-    // int width = 512;
-    // int height = 512;
+    int width = 512;
+    int height = 512;
 };
 
 
@@ -513,6 +513,37 @@ struct HardComposite : public ImageProcess
     bool mousePressed=false;
     glm::vec2 previousMousPos = glm::vec2(-1);
 
+};
+
+struct SeamCarvingResize : public ImageProcess
+{
+    SeamCarvingResize(bool enabled=true);
+    void SetUniforms() override;
+    bool RenderGui() override;
+    void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+
+    float SeamCarvingResize::CalculateCostAt(glm::ivec2 position, std::vector<glm::vec4> &image, int width, int height);
+    std::vector<glm::vec4> originalData;
+    std::vector<glm::vec4> imageData;
+    std::vector<glm::vec4> debugData;
+
+    struct Seam
+    {
+        std::vector<glm::ivec2> points;
+    };
+    std::vector<Seam> downSizeSeams;
+    std::vector<bool> downSizeSeamsDone;
+    std::vector<Seam> upSizeSeams;
+    std::vector<bool> upSizeSeamsDone;
+
+    bool debug=false;
+
+    int numPerIterations=1;
+    int iterations=0;
+
+    int resizedWidth;
+
+    bool increase=false;
 };
 
 struct PatchInpainting : public ImageProcess
