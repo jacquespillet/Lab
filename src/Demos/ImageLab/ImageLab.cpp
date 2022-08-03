@@ -2689,9 +2689,6 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
             }
         }
     }
-    //Set the image Data to be original data at start
-    imageData = originalData;   
-    
 
     //If debug, read back all the time.
     if(debug)
@@ -2800,47 +2797,58 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                 iterations++;
             }
         }
-        
+        //Set the image Data to be original data at start
+        imageData = originalData;   
+    
         //Preallocate the memory to copy for upsizing
+        std::vector<glm::vec4> lineWithPadding(width * 2);
         std::vector<uint8_t> memToCopy(width * sizeof(glm::vec4));
         for(int y=0; y<height; y++)
         {
             int resizedWidth = width;
-            int decCount=0;
             int incCount=0;
-            //Decrease
+            //Copy current line into a padded buffer because
+            //If there is some upsizing seams before a downsizing one on a line,
+            //it will shift the image right first, and we'll lose the information that is on the right
+            //With a padded buffer, it will just be shifted right in the padding and we can retrieve it after.
+            memcpy(&lineWithPadding[0], &imageData[y * width], width * sizeof(glm::vec4));
+
+            //Loop through the line :
+            //if we encounter an decrease, we shift the line left after this point
+            //if we encounter an increase, we shift the line right after this point and add an average in between
             for(int x = 0; x<width; x++)
             {
                 int inx = y * width + x;
                 if(onSeam[inx].x>0)
                 { 
-                    size_t shiftSize = (width - x - 1) * sizeof(glm::vec4);
-                    memcpy((void*)&imageData[inx], (void*)&imageData[inx+1], shiftSize);
+                    size_t shiftSize = (width - x - 1 + incCount) * sizeof(glm::vec4);
+                    memcpy((void*)&lineWithPadding[x], (void*)&lineWithPadding[x+1], shiftSize);
                     resizedWidth-=onSeam[inx].x;
-                    decCount++;
                 }
-            }
-
-            //Increase
-            //PROBLEM : we use the seams from the full image, while they should be added to the downsampled image
-            for(int x = 0; x<width; x++)
-            {
-                int inx = y * width + x;
                 if(onSeam[inx].y > 0)
                 {
-                    glm::vec4 pixValue = (imageData[inx-1] + imageData[inx+1]) * 0.5;
+                    //Calculate average of the 2 neighbours
+                    glm::vec4 pixValue = (lineWithPadding[x-1] + lineWithPadding[x+1]) * 0.5;
 
-                    size_t shiftSize = (width - x - 1) * sizeof(glm::vec4);
+                    //Important : for it to be a proper shift, we do not only shift with the width, but we have to add also all the appended elements!
+                    size_t shiftSize = (width - x + incCount) * sizeof(glm::vec4);
                     
-                    memcpy((void*)&memToCopy[0], (void*)&imageData[inx], shiftSize);
-                    memcpy((void*)&imageData[inx+1], (void*)&memToCopy[0], shiftSize);
+                    //Copy all the pixels from this one to the end into a temp buffer
+                    memcpy((void*)&memToCopy[0], (void*)&lineWithPadding[x], shiftSize);
+
+                    //Copy this buffer to the pixel on the right
+                    memcpy((void*)&lineWithPadding[x+1], (void*)&memToCopy[0], shiftSize);
                     
-                    imageData[inx] = pixValue;
+                    //set the current pixel
+                    lineWithPadding[x] = pixValue;
+                    
                     resizedWidth+=onSeam[inx].y;
                     incCount++;
                 }
             }
-
+            //copy back padded buffer into line
+            memcpy(&imageData[y * width], &lineWithPadding[0], width * sizeof(glm::vec4));
+            
             for(int x=resizedWidth; x<width; x++)
             {
                 int inx = y * width + x;
