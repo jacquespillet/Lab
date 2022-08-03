@@ -521,6 +521,10 @@ struct SeamCarvingResize : public ImageProcess
     void SetUniforms() override;
     bool RenderGui() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
+    virtual bool MouseMove(float x, float y) override;
+    virtual bool MousePressed() override;
+    virtual bool MouseReleased() override;
+    
 
     float SeamCarvingResize::CalculateCostAt(glm::ivec2 position, std::vector<glm::vec4> &image, int width, int height);
     
@@ -549,9 +553,20 @@ struct SeamCarvingResize : public ImageProcess
     int numPerIterations=1;
     int iterations=0;
 
-    // int resizedWidth;
-
     bool increase=false;
+
+    bool forceRegion=false;
+    //Mask
+    GL_TextureFloat maskTexture;
+    std::vector<glm::vec4> maskData;
+    GLint viewMaskShader;
+    bool drawingMask=false;
+    bool adding=true;
+    bool selected=false;
+    bool mousePressed=false;
+    glm::vec2 previousMousPos = glm::vec2(-1);
+    int radius = 1;    
+
 };
 
 struct PatchInpainting : public ImageProcess
@@ -578,12 +593,9 @@ struct PatchInpainting : public ImageProcess
     GLint viewMaskShader;
     bool drawingMask=false;
     bool adding=true;
-
     bool selected=false;
-
     bool mousePressed=false;
     glm::vec2 previousMousPos = glm::vec2(-1);
-
     int radius = 1;
 
     bool iterate=false;

@@ -49,7 +49,7 @@ set demoFiles= %demoFiles% %dearimguiSrc%
 REM --------------------
 
 
-set compilerFlags= /DEBUG -MP -MT -nologo -EHa- -O2 -Oi -W4 -Z7 -EHsc -wd4201 -wd4310 -wd4100 -wd4312 -wd4996 /I ../src /I ..\ext\stb /I %dearimgui% /I %glfwInclude%  /I %glewIncludes% /I %dearimguiPlotInclude% /I %glmInclude% /I %assimpIncludes% /I %fftwInclude%
+set compilerFlags= /DEBUG -MP -MT -nologo -EHa- -Od -Oi -W4 -Z7 -EHsc -wd4201 -wd4310 -wd4100 -wd4312 -wd4996 /I ../src /I ..\ext\stb /I %dearimgui% /I %glfwInclude%  /I %glewIncludes% /I %dearimguiPlotInclude% /I %glmInclude% /I %assimpIncludes% /I %fftwInclude%
 set linkerFlags=  -opt:ref Gdi32.lib Shell32.lib opengl32.lib %glfwLib%  %glewLib% %assimpLib% %fftwLib%
 
 IF NOT EXIST .\build mkdir .\build
