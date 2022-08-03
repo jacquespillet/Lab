@@ -2644,12 +2644,13 @@ float SeamCarvingResize::CalculateCostAt(glm::ivec2 position, std::vector<glm::v
     float gradX = nextXGrayScale - currentGrayScale;
     float gradY = nextYGrayScale - currentGrayScale;
 
-    return (gradX * gradX + gradY * gradY);
+    return (gradX * gradX + gradY * gradY) * 10;
 }
 
 void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, int height)
 {
-    if(maskTexture.width != imageProcessStack->width || maskTexture.height != imageProcessStack->height || !maskTexture.loaded)
+    //Resize objects if size has changed
+    if(width * height != imageData.size()) 
     {
         TextureCreateInfo tci = {};
         tci.generateMipmaps =false;
@@ -2659,12 +2660,32 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
         maskTexture = GL_TextureFloat(imageProcessStack->width, imageProcessStack->height, tci);
 
         maskData.resize(maskTexture.width * maskTexture.height);
+
+        seams.clear();
+        
+        imageData.resize(width * height, glm::vec4(0));
+        originalData.resize(width * height, glm::vec4(0));
+        gradient.resize(width * height, 0);
+        debugData.resize(width * height);
+        costs.resize(width*height, 0);
+        directions.resize(width*height, 0);
+        seamData.resize(width*height, 0);
+
+        numIncreases=0;
+        numDecreases=0;
+
+        iterations=0;
     }
+
     
     if(drawingMask)
     {
         glUseProgram(viewMaskShader);
         SetUniforms();
+        
+        glBindTexture(GL_TEXTURE_2D, textureIn);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, imageData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
 
         glUniform1i(glGetUniformLocation(viewMaskShader, "textureIn"), 0); //program must be active
         glBindImageTexture(0, textureIn, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA16F);
@@ -2681,25 +2702,6 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
     }
     else
     {
-        //Resize objects if size has changed
-        if(width * height != imageData.size()) 
-        {
-            seams.clear();
-            
-            imageData.resize(width * height, glm::vec4(0));
-            originalData.resize(width * height, glm::vec4(0));
-            gradient.resize(width * height, 0);
-            debugData.resize(width * height);
-            onSeam.resize(width * height);
-            costs.resize(width*height, 0);
-            directions.resize(width*height, 0);
-
-            numIncreases=0;
-            numDecreases=0;
-
-            iterations=0;
-        }
-
         //If first iteration, read back original data.
         if(iterations==0)
         {
@@ -2710,106 +2712,140 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                             GL_FLOAT,   // Using this data type per-pixel
                             originalData.data());
             glBindTexture(GL_TEXTURE_2D, 0);
-            
-            onSeam = std::vector<glm::ivec2>(width * height, glm::ivec2(0));
-            
-            for(int y=0; y<height; y++)
-            {
-                for(int x=0; x<width; x++)
-                {
-                    int inx = y * width + x;
-                    gradient[inx] = CalculateCostAt(glm::ivec2(x, y), originalData, width, height) * 0.5f;
-                }
-            }
+            imageData = originalData;
+            currentWidth = width;            
         }
 
         //If debug, read back all the time.
         if(debug)
         {
-            glBindTexture(GL_TEXTURE_2D, textureIn);
-            glGetTexImage (GL_TEXTURE_2D,
-                            0,
-                            GL_RGBA, // GL will convert to this format
-                            GL_FLOAT,   // Using this data type per-pixel
-                            debugData.data());
-            glBindTexture(GL_TEXTURE_2D, 0);  
-
-            for(int i=0; i<onSeam.size(); i++)
+            // glBindTexture(GL_TEXTURE_2D, textureIn);
+            // glGetTexImage (GL_TEXTURE_2D,
+            //                 0,
+            //                 GL_RGBA, // GL will convert to this format
+            //                 GL_FLOAT,   // Using this data type per-pixel
+            //                 debugData.data());
+            // glBindTexture(GL_TEXTURE_2D, 0);  
+            
+            // for(int i=0; i<seams.size(); i++)
+            // {
+            //     for(int j=0; j<seams[i].points.size(); j++)
+            //     {
+            //         glm::ivec2 p = seams[i].points[j];
+            //         int inx = p.y * width + p.x;
+            //         debugData[inx] = glm::vec4(1,0,0,1);
+            //     }
+            // }              
+            // for(int i=0; i<debugData.size(); i++)
+            // {
+            //     gradient[inx];
+            // }
+            // gradient.resize(height * currentWidth);
+            // for(int y=0; y<height; y++)
+            // {
+            //     for(int x=0; x<currentWidth; x++)
+            //     {
+            //         int inx = y * currentWidth + x;
+            //         gradient[inx] = CalculateCostAt(glm::ivec2(x, y), imageData, width, height);
+            //         if(seamData[y * width + x]) gradient[inx] += 1e30f;
+            //     }
+            // }            
+            /*for(int y=0; y<height; y++)
             {
-                if(onSeam[i].x>0) debugData[i] = glm::vec4(1,0,0,1);
-                else if(onSeam[i].y>0) debugData[i] = glm::vec4(0,1,0,1);
-            }              
+                for(int x=0; x<width; x++)
+                {
+                    int inx = y * (currentWidth+ increase ? -1 : 1 ) + x;
+                    float g = (float)costs[inx];
+                    debugData[y * width + x] = glm::vec4(g,g,g,1);
+                }
+            }*/
         }
         else
         {
             if(!debugChanged)
             {
-
                 for(int k=0; k<numPerIterations; k++)
                 {
-                    //Calculate cost for first line
-                    for(int x=0; x<width; x++)
+                    //Precalculate energy
+                    gradient.resize(height * currentWidth);
+                    costs.resize(height * currentWidth);
+                    directions.resize(height * currentWidth);
+                    for(int y=0; y<height; y++)
                     {
-                        int y=0;
-                        int inx = y * width + x; 
-                        costs[inx] = gradient[inx];
-                        if(onSeam[inx].x || onSeam[inx].y) 
+                        for(int x=0; x<currentWidth; x++)
                         {
-                            costs[inx] = 1e30f;
+                            int inx = y * currentWidth + x;
+                            gradient[inx] = CalculateCostAt(glm::ivec2(x, y), imageData, width, height);
+                            if(seamData[y * width + x]>0) gradient[inx] += 10;
+                            if(x <=1) gradient[inx]=1e30f;
+                            if(x >=currentWidth-2) gradient[inx]=1e30f;
                         }
+                    }
+
+                    //Calculate cost for first line
+                    for(int x=0; x<currentWidth; x++)
+                    {
+                        costs[x] = gradient[x];
                     }
 
                     //Go down, and accumulate the costs
                     for(int y=1; y<height; y++)
                     {
-                        for(int x=0; x<width; x++)
+                        for(int x=0; x<currentWidth; x++)
                         {
-                            int inx = y * width + x; 
-                            costs[inx] = gradient[inx];
+                            int inx = y * currentWidth + x; 
+                            costs[inx] = gradient[y * currentWidth + x];
 
-                            if(forceRegion)
-                            {
-                                if(maskData[inx].x>0)
-                                {
-                                    costs[inx]-=100;
-                                }
-                            }
+                            float topCost = costs[inx-currentWidth];
+                            float topLeftCost = costs[inx-currentWidth - 1];
+                            float topRightCost = costs[inx-currentWidth + 1];
+                            if(x<=1) topLeftCost=1e30f;
+                            if(x >= currentWidth-2) topRightCost=1e30f;
 
-                            // if(!increase &&  (500 < x && x < 600) && (300 < y && y < 400)) costs[inx] = -10;
-                            
-                            float topCost = costs[inx-width];
-                            float topLeftCost = costs[inx-width - 1];
-                            float topRightCost = costs[inx-width + 1];
-                            if(x==0) topLeftCost=1e30f;
-                            if(x==width-2) topRightCost=1e30f;
-
+                            // if(forceRegion)
+                            // {
+                            //     if(maskData[inx].x>0)
+                            //     {
+                            //         costs[inx]-=100;
+                            //     }
+                            // }
+                            float prevCost = costs[inx];
+                            bool add = false;
                             if(topCost <= topLeftCost && topCost <= topRightCost)
                             {
+                                add=true;
                                 costs[inx] += topCost;
                                 directions[inx] = 0;
                             }
                             else if(topLeftCost <= topCost && topLeftCost <= topRightCost)
                             {
+                                add=true;
                                 costs[inx] += topLeftCost;
                                 directions[inx] = -1;
                             }
                             else if(topRightCost <= topCost && topRightCost <= topLeftCost)
                             {
+                                add=true;
                                 costs[inx] += topRightCost;
                                 directions[inx] = 1;
                             }
+                            assert(add);
 
-                            if(onSeam[inx].x || onSeam[inx].y) costs[inx] += 10;
+                            float newCost = costs[inx];
+                            assert(newCost >= prevCost);
+
+                            float c = (costs[inx] * 0.1f);
+							debugData[y * width + x] = glm::vec4(c,c,c,1);
                         }
                     }
 
                     //Find the lowest cost on the bottom line
                     glm::ivec2 lowestInx(0);
                     float lowestCost = 1e30f;
-                    for(int x=0; x<width; x++)
+                    for(int x=0; x<currentWidth; x++)
                     {
                         int y = height-1;
-                        int inx = y * width + x;
+                        int inx = y * currentWidth + x;
                         float cost = costs[inx];
                         if(cost < lowestCost)
                         {
@@ -2827,110 +2863,59 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                     int added=0;
                     while(true)
                     {
-                        if(increase) onSeam[currentPoint.y * width + currentPoint.x].y++;
-                        else         onSeam[currentPoint.y * width + currentPoint.x].x++;
-
                         seams[seams.size()-1].points[added++] = (currentPoint);
-                        int direction = directions[currentPoint.y * width + currentPoint.x];
+                        int direction = directions[currentPoint.y * currentWidth + currentPoint.x];
                         currentPoint = glm::ivec2(currentPoint.x + direction, currentPoint.y-1);
                         if(currentPoint.y==-1) 
                         {
                             break;
                         }
                     }
+
+                    std::vector<glm::ivec2> &points = seams[seams.size()-1].points;
+                    std::vector<glm::vec4> memory(width);
+                    for(int i=0; i<points.size(); i++)
+                    {
+                        glm::ivec2 p = points[i];
+                        int inx = p.y * width + p.x;
+                        if(increase && currentWidth< width)
+                        {
+                            
+                            glm::vec4 color = (imageData[inx-1] + imageData[inx]) * 0.5f;
+                            int shiftSize = currentWidth - p.x;
+                            memcpy(&memory[0], &imageData[inx], shiftSize * sizeof(glm::vec4));
+                            memcpy(&imageData[inx+1], &memory[0], shiftSize * sizeof(glm::vec4));
+
+                            memcpy(&memory[0], &maskData[inx], shiftSize * sizeof(glm::vec4));
+                            memcpy(&maskData[inx+1], &memory[0], shiftSize * sizeof(glm::vec4));
+
+                            seamData[inx]=1;
+                            seamData[inx+1]=1;
+                        
+                            imageData[inx] = color;
+                        }
+                        else if(!increase && currentWidth > 0)
+                        {
+                            int shiftSize = currentWidth - p.x - 1;
+                            memcpy(&imageData[inx], &imageData[inx+1], shiftSize * sizeof(glm::vec4));
+                            memcpy(&maskData[inx], &maskData[inx+1], shiftSize * sizeof(glm::vec4));
+
+                        }
+                    }
+                    
+                    // increase ? currentWidth ++ : currentWidth--;
+                    if(increase && currentWidth < width) currentWidth++;
+                    else if(currentWidth>0) currentWidth--;
                     iterations++;
                 }
-            }
-            //Set the image Data to be original data at start
-            imageData = originalData;   
-#if 1
-            //Preallocate the memory to copy for upsizing
-            std::vector<glm::vec4> lineWithPadding(width * 2);
-            std::vector<glm::ivec2> seamWithPadding(width * 2);
-            std::vector<uint8_t> memToCopy(width * sizeof(glm::vec4));
-            for(int y=0; y<height; y++)
-            {
-                int resizedWidth = width;
-                int incCount=0;
-                //Copy current line into a padded buffer because
-                //If there is some upsizing seams before a downsizing one on a line,
-                //it will shift the image right first, and we'll lose the information that is on the right
-                //With a padded buffer, it will just be shifted right in the padding and we can retrieve it after.
-                memcpy(&lineWithPadding[0], &imageData[y * width], width * sizeof(glm::vec4));
-                memcpy(&seamWithPadding[0], &onSeam[y * width], width * sizeof(glm::ivec2));
-
-                //Loop through the line :
-                //if we encounter an decrease, we shift the line left after this point
-                //if we encounter an increase, we shift the line right after this point and add an average in between
-                for(int x = 0; x<width; x++)
-                {
-                    int inx = y * width + x;
-                    if(seamWithPadding[x].x>0)
-                    { 
-                        size_t shiftSize = (width - x - 1 + incCount);
-                        resizedWidth-=seamWithPadding[x].x;
-                        memcpy((void*)&lineWithPadding[x], (void*)&lineWithPadding[x+1], shiftSize * sizeof(glm::vec4));
-                        //memcpy((void*)&seamWithPadding[x], (void*)&seamWithPadding[x+1], shiftSize * sizeof(glm::ivec2));
-                    }
-                    if(seamWithPadding[x].y > 0)
-                    {
-                        //Calculate average of the 2 neighbours
-                        glm::vec4 pixValue = (lineWithPadding[x-1] + lineWithPadding[x+1]) * 0.5;
-
-                        //Important : for it to be a proper shift, we do not only shift with the width, but we have to add also all the appended elements!
-                        size_t shiftSize = (width - x + incCount);
-                        
-                        //Copy all the pixels from this one to the end into a temp buffer
-                        memcpy((void*)&memToCopy[0], (void*)&lineWithPadding[x], shiftSize * sizeof(glm::vec4));
-                        //Copy this buffer to the pixel on the right
-                        memcpy((void*)&lineWithPadding[x+1], (void*)&memToCopy[0], shiftSize * sizeof(glm::vec4));
-                        
-                        // memcpy((void*)&memToCopy[0], (void*)&seamWithPadding[x], shiftSize);
-                        // memcpy((void*)&seamWithPadding[x+1], (void*)&memToCopy[0], shiftSize);
-                        
-                        //set the current pixel
-                        lineWithPadding[x] = pixValue;
-                        
-                        resizedWidth+=seamWithPadding[x].y;
-                        incCount++;
-                    }
-                }
-                //copy back padded buffer into line
-                memcpy(&imageData[y * width], &lineWithPadding[0], width * sizeof(glm::vec4));
-
-                for(int x=resizedWidth; x<width; x++)
-                {
-                    int inx = y * width + x;
-                    imageData[inx] = glm::vec4(0,0,0,1);
-                }
-            }    
-#else
-            for(int y=0; y<height; y++)
-            {
-                glm::vec4* line = &imageData[y * width];
-                int resizedWidth = width;
-                for(int x=0; x<width; x++)
-                {
-                    int endX=x;
-                    if(onSeam[y * width + endX].x>0)
-                    {
-                        resizedWidth-= onSeam[y * width + endX].x;
-                        endX++;
-                        memcpy(&line[x], &line[endX+1], width - endX - 1);
-                    }
-                    if(endX != x)
-                    {
-                    }
-                }
-                for(int x=resizedWidth; x<width; x++)
-                {
-                    line[x] = glm::vec4(0,0,0,1);
-                }
-            }
-
-#endif
+            } 
         }
+
+
         
+        glBindTexture(GL_TEXTURE_2D, maskTexture.glTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, maskTexture.width, maskTexture.height, 0, GL_RGBA, GL_FLOAT, maskData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);  
 
         glBindTexture(GL_TEXTURE_2D, textureOut);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, debug ? debugData.data() :  imageData.data());
@@ -2981,6 +2966,8 @@ bool SeamCarvingResize::RenderGui()
     }
     else drawingMask=false;
     
+    ImGui::Text("Current Width %d", currentWidth);  
+
     selected=true;
     return changed;
 }
@@ -6277,7 +6264,7 @@ void ImageLab::Load() {
     // imageProcessStack.AddProcess(new AddImage(true, "resources\\StripesHQ.png"));
     // imageProcessStack.AddProcess(new AddImage(true, "resources\\Stripes.png"));
     // imageProcessStack.AddProcess(new AddImage(true, "resources\\StripesHoriz.png"));
-    imageProcessStack.AddProcess(new AddImage(true, "resources\\peppers.png"));
+    imageProcessStack.AddProcess(new AddImage(true, "resources\\Tom.PNG"));
     // imageProcessStack.AddProcess(new AddImage(true, "resources/peppers.png"));
     imageProcessStack.AddProcess(new SeamCarvingResize(true));
     // imageProcessStack.AddProcess(new Dithering(true));

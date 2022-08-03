@@ -529,15 +529,17 @@ struct SeamCarvingResize : public ImageProcess
     float SeamCarvingResize::CalculateCostAt(glm::ivec2 position, std::vector<glm::vec4> &image, int width, int height);
     
     std::vector<glm::vec4> originalData;
-    std::vector<float> gradient;
     std::vector<glm::vec4> imageData;
     std::vector<glm::vec4> debugData;
+    std::vector<int> seamData;
     
     std::vector<float> costs;
     std::vector<int> directions;
-    
-    std::vector<glm::ivec2> onSeam;
+    std::vector<float> gradient;
 
+    int currentWidth;
+    
+    
     int numIncreases=0;
     int numDecreases=0;
 
