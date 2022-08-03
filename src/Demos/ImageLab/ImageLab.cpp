@@ -2661,6 +2661,9 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
         costs.resize(width*height, 0);
         directions.resize(width*height, 0);
 
+        numIncreases=0;
+        numDecreases=0;
+
         iterations=0;
     }
 
@@ -2682,7 +2685,7 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
             for(int x=0; x<width; x++)
             {
                 int inx = y * width + x;
-                gradient[inx] = CalculateCostAt(glm::ivec2(x, y), originalData, width, height);
+                gradient[inx] = CalculateCostAt(glm::ivec2(x, y), originalData, width, height) * 0.5f;
             }
         }
     }
@@ -2699,107 +2702,113 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                         GL_RGBA, // GL will convert to this format
                         GL_FLOAT,   // Using this data type per-pixel
                         debugData.data());
-        glBindTexture(GL_TEXTURE_2D, 0);        
-    }
+        glBindTexture(GL_TEXTURE_2D, 0);  
 
-    
-    for(int k=0; k<numPerIterations; k++)
-    {
-        //Calculate cost for first line
-        for(int x=0; x<width; x++)
-        {
-            int y=0;
-            int inx = y * width + x; 
-            costs[inx] = gradient[inx];
-            if(onSeam[inx].x || onSeam[inx].y) costs[inx] = 10;
-        }
-
-        //Go down, and accumulate the costs
-        for(int y=1; y<height; y++)
-        {
-            for(int x=0; x<width; x++)
-            {
-                int inx = y * width + x; 
-                costs[inx] = gradient[inx];
-                
-                float topCost = costs[inx-width];
-                float topLeftCost = costs[inx-width - 1];
-                float topRightCost = costs[inx-width + 1];
-                if(x==0) topLeftCost=1000;
-                if(x==width-2) topRightCost=1000;
-
-                if(topCost <= topLeftCost && topCost <= topRightCost)
-                {
-                    costs[inx] += topCost;
-                    directions[inx] = 0;
-                }
-                else if(topLeftCost <= topCost && topLeftCost <= topRightCost)
-                {
-                    costs[inx] += topLeftCost;
-                    directions[inx] = -1;
-                }
-                else if(topRightCost <= topCost && topRightCost <= topLeftCost)
-                {
-                    costs[inx] += topRightCost;
-                    directions[inx] = 1;
-                }
-
-                if(onSeam[inx].x || onSeam[inx].y) costs[inx] += 10;
-            }
-        }
-
-        //Find the lowest cost on the bottom line
-        glm::ivec2 lowestInx(0);
-        float lowestCost = 1e30f;
-        for(int x=0; x<width; x++)
-        {
-            int y = height-1;
-            int inx = y * width + x;
-            float cost = costs[inx];
-            if(cost < lowestCost)
-            {
-                lowestCost=cost;
-                lowestInx=glm::ivec2(x, y);
-            }
-        }
-
-        //Add a new seam
-        seams.resize(seams.size()+1);
-        seams[seams.size()-1].points.resize(height);
-
-        //Find the path, from bottom to top
-        glm::ivec2 currentPoint =  lowestInx;
-        int added=0;
-        while(true)
-        {
-            onSeam[currentPoint.y * width + currentPoint.x].y++;
-            onSeam[currentPoint.y * width + currentPoint.x].x++;
-
-            seams[seams.size()-1].points[added++] = (currentPoint);
-            int direction = directions[currentPoint.y * width + currentPoint.x];
-            currentPoint = glm::ivec2(currentPoint.x + direction, currentPoint.y-1);
-            if(currentPoint.y==-1) 
-            {
-                break;
-            }
-        }
-        iterations++;
-    }
-    if(debug)
-    {
         for(int i=0; i<onSeam.size(); i++)
         {
             if(onSeam[i].x>0) debugData[i] = glm::vec4(1,0,0,1);
             else if(onSeam[i].y>0) debugData[i] = glm::vec4(0,1,0,1);
-        }
-    }    
+        }              
+    }
     else
     {
+        if(!debugChanged)
+        {
+
+            for(int k=0; k<numPerIterations; k++)
+            {
+                //Calculate cost for first line
+                for(int x=0; x<width; x++)
+                {
+                    int y=0;
+                    int inx = y * width + x; 
+                    costs[inx] = gradient[inx];
+                    if(onSeam[inx].x || onSeam[inx].y) costs[inx] = 1e30f;
+                }
+
+                //Go down, and accumulate the costs
+                for(int y=1; y<height; y++)
+                {
+                    for(int x=0; x<width; x++)
+                    {
+                        int inx = y * width + x; 
+                        costs[inx] = gradient[inx];
+
+                        // if(!increase &&  (500 < x && x < 600) && (300 < y && y < 400)) costs[inx] = -10;
+                        
+                        float topCost = costs[inx-width];
+                        float topLeftCost = costs[inx-width - 1];
+                        float topRightCost = costs[inx-width + 1];
+                        if(x==0) topLeftCost=1e30f;
+                        if(x==width-2) topRightCost=1e30f;
+
+                        if(topCost <= topLeftCost && topCost <= topRightCost)
+                        {
+                            costs[inx] += topCost;
+                            directions[inx] = 0;
+                        }
+                        else if(topLeftCost <= topCost && topLeftCost <= topRightCost)
+                        {
+                            costs[inx] += topLeftCost;
+                            directions[inx] = -1;
+                        }
+                        else if(topRightCost <= topCost && topRightCost <= topLeftCost)
+                        {
+                            costs[inx] += topRightCost;
+                            directions[inx] = 1;
+                        }
+
+                        if(onSeam[inx].x || onSeam[inx].y) costs[inx] += 1;
+                    }
+                }
+
+                //Find the lowest cost on the bottom line
+                glm::ivec2 lowestInx(0);
+                float lowestCost = 1e30f;
+                for(int x=0; x<width; x++)
+                {
+                    int y = height-1;
+                    int inx = y * width + x;
+                    float cost = costs[inx];
+                    if(cost < lowestCost)
+                    {
+                        lowestCost=cost;
+                        lowestInx=glm::ivec2(x, y);
+                    }
+                }
+
+                //Add a new seam
+                seams.resize(seams.size()+1);
+                seams[seams.size()-1].points.resize(height);
+
+                //Find the path, from bottom to top
+                glm::ivec2 currentPoint =  lowestInx;
+                int added=0;
+                while(true)
+                {
+                    if(increase) onSeam[currentPoint.y * width + currentPoint.x].y++;
+                    else         onSeam[currentPoint.y * width + currentPoint.x].x++;
+
+                    seams[seams.size()-1].points[added++] = (currentPoint);
+                    int direction = directions[currentPoint.y * width + currentPoint.x];
+                    currentPoint = glm::ivec2(currentPoint.x + direction, currentPoint.y-1);
+                    if(currentPoint.y==-1) 
+                    {
+                        break;
+                    }
+                }
+                iterations++;
+            }
+        }
+        
         //Preallocate the memory to copy for upsizing
         std::vector<uint8_t> memToCopy(width * sizeof(glm::vec4));
         for(int y=0; y<height; y++)
         {
             int resizedWidth = width;
+            int decCount=0;
+            int incCount=0;
+            //Decrease
             for(int x = 0; x<width; x++)
             {
                 int inx = y * width + x;
@@ -2808,7 +2817,15 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                     size_t shiftSize = (width - x - 1) * sizeof(glm::vec4);
                     memcpy((void*)&imageData[inx], (void*)&imageData[inx+1], shiftSize);
                     resizedWidth-=onSeam[inx].x;
+                    decCount++;
                 }
+            }
+
+            //Increase
+            //PROBLEM : we use the seams from the full image, while they should be added to the downsampled image
+            for(int x = 0; x<width; x++)
+            {
+                int inx = y * width + x;
                 if(onSeam[inx].y > 0)
                 {
                     glm::vec4 pixValue = (imageData[inx-1] + imageData[inx+1]) * 0.5;
@@ -2820,8 +2837,10 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                     
                     imageData[inx] = pixValue;
                     resizedWidth+=onSeam[inx].y;
+                    incCount++;
                 }
             }
+
             for(int x=resizedWidth; x<width; x++)
             {
                 int inx = y * width + x;
@@ -2829,6 +2848,7 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
             }
         }     
     }
+    
 
     glBindTexture(GL_TEXTURE_2D, textureOut);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, debug ? debugData.data() :  imageData.data());
@@ -2844,17 +2864,25 @@ bool SeamCarvingResize::RenderGui()
 {
     bool changed=false;
     ImGui::SliderInt("NumPerIterations", &numPerIterations, 1, 30);
-    changed |= ImGui::Checkbox("Debug Seams", &debug);
+    
+    debugChanged = ImGui::Checkbox("Debug Seams", &debug);
+    changed |= debugChanged;
+
     if(ImGui::Button("Add"))
     {
         increase=true;
         changed=true;
+        numIncreases+= numPerIterations;
     }
     if(ImGui::Button("Remove"))
     {
         increase=false;
         changed=true;
+        numDecreases+= numPerIterations;
     }
+
+    ImGui::Text("Increases :%d", numIncreases);
+    ImGui::Text("Decreases :%d", numDecreases);
     return changed;
 }
 

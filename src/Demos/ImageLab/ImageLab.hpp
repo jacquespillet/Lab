@@ -534,6 +534,9 @@ struct SeamCarvingResize : public ImageProcess
     
     std::vector<glm::ivec2> onSeam;
 
+    int numIncreases=0;
+    int numDecreases=0;
+
     struct Seam
     {
         std::vector<glm::ivec2> points;
@@ -541,6 +544,7 @@ struct SeamCarvingResize : public ImageProcess
     std::vector<Seam> seams;
 
     bool debug=false;
+    bool debugChanged=false;
 
     int numPerIterations=1;
     int iterations=0;
