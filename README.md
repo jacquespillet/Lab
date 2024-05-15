@@ -162,7 +162,7 @@ Wave :
 
 This allows to define the shape of the sound wave. It can be an accumulation of multiple frequency functions (Sine, Cosine, Saw Tooth, Triangle, Square, Noise, Impulse, Sawn)
 
-![Wave](https://github.com/jacquespillet/Lab/blob/main/resources/Gallery/AudioLab/Wave.png?raw=true)
+![Wave](https://github.com/jacquespillet/Lab/blob/main/resources/Gallery/AudioLab/Wave.PNG?raw=true)
 
 There's also a possibility to add a high-pass filter, and to do frequency decay to create drums.
 
