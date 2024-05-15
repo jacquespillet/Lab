@@ -50,8 +50,8 @@ bool GL_Camera::mouseMoveEvent(float x, float y) {
     } else if (IsRightMousePressed) {
         if(prevPos.x >0) {
             glm::ivec2 diff = currentPos - prevPos;
-            target -= (float)diff.x * 0.005 * distance * glm::vec3(modelMatrix[0]);
-            target += (float)diff.y * 0.005 * distance *  glm::vec3(modelMatrix[1]);
+            target -= (float)diff.x * 0.005f * distance * glm::vec3(modelMatrix[0]);
+            target += (float)diff.y * 0.005f * distance *  glm::vec3(modelMatrix[1]);
             RecalculateLookat();
             changed=true;  
             

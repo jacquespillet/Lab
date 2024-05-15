@@ -381,13 +381,13 @@ struct Dilation : public ImageProcess
 
 struct AddImage : public ImageProcess
 {
-    AddImage(bool enabled=true, char* fileName="");
+    AddImage(bool enabled=true, std::string fileName="");
     void SetUniforms() override;
     bool RenderGui() override;
     void Unload() override;
     void Process(GLuint textureIn, GLuint textureOut, int width, int height) override;
 
-    char fileName[128];
+    std::string fileName;
     GL_TextureFloat texture;
     bool filenameChanged=false;
     float multiplier=1;
@@ -396,12 +396,12 @@ struct AddImage : public ImageProcess
 
 struct MultiplyImage : public ImageProcess
 {
-    MultiplyImage(bool enabled=true, char* fileName="");
+    MultiplyImage(bool enabled=true, std::string fileName="");
     void SetUniforms() override;
     bool RenderGui() override;
     void Unload() override;
 
-    char fileName[128];
+    std::string fileName;
     GL_TextureFloat texture;
     bool filenameChanged=false;
     float multiplier=1;
@@ -479,7 +479,7 @@ struct PenDraw : public ImageProcess
 
 struct HardComposite : public ImageProcess
 {
-    HardComposite(bool enabled=true, char* fileName="");
+    HardComposite(bool enabled=true, std::string fileName="");
     void SetUniforms() override;
     bool RenderGui() override;
     void Unload() override;
@@ -498,7 +498,7 @@ struct HardComposite : public ImageProcess
     bool adding=true;
 
     //Source texture
-    char fileName[128];
+    std::string fileName;
     GL_TextureFloat texture;
     bool filenameChanged=false;
     GLint compositeShader;
@@ -616,7 +616,7 @@ struct PatchInpainting : public ImageProcess
 
 struct MultiResComposite : public ImageProcess
 {
-    MultiResComposite(bool enabled=true, char* fileName="");
+    MultiResComposite(bool enabled=true, std::string fileName="");
     void SetUniforms() override;
     bool RenderGui() override;
     void Unload() override;
@@ -638,7 +638,7 @@ struct MultiResComposite : public ImageProcess
     GaussianPyramid maskPyramid;
 
     //Source texture
-    char fileName[128];
+    std::string fileName;
     GL_TextureFloat texture;
     bool filenameChanged=false;
     LaplacianPyramid sourcePyramid;
@@ -1101,6 +1101,8 @@ public :
     void Render();
     void RenderGUI();
     void Unload();
+
+    void SaveImage(std::string FilePath);
 
     void MouseMove(float x, float y);
     void LeftClickDown();

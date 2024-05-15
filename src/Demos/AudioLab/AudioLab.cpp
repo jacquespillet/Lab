@@ -1,7 +1,6 @@
 #include "AudioLab.hpp"
 
-#include "GL/glew.h"
-#include <glm/gtx/quaternion.hpp>
+#include "glad/gl.h"
 
 #include "GL_Helpers/Util.hpp"
 #include <fstream>
@@ -9,38 +8,40 @@
 #include <random>
 #include <algorithm>
 
+#include <glm/gtc/type_ptr.hpp>
+
 #include "imgui.h"
 #include "olcNoiseMaker.h"
 
-//https://blog.demofox.org/diy-synthesizer/
-//https://github.com/micknoise/Maximilian/blob/master/src/maximilian.cpp
+// //https://blog.demofox.org/diy-synthesizer/
+// //https://github.com/micknoise/Maximilian/blob/master/src/maximilian.cpp
 
 
-//TODO
-//  add flange effect https://blog.demofox.org/2015/03/16/diy-synth-flange-effect/
-//  add delay https://blog.demofox.org/2015/03/17/diy-synth-delay-effect-echo/
-//  add reverb https://blog.demofox.org/2015/03/17/diy-synth-multitap-reverb/
-//  add convolution reverb https://blog.demofox.org/2015/03/23/diy-synth-convolution-reverb-1d-discrete-convolution-of-audio-samples/
+// //TODO
+// //  add flange effect https://blog.demofox.org/2015/03/16/diy-synth-flange-effect/
+// //  add delay https://blog.demofox.org/2015/03/17/diy-synth-delay-effect-echo/
+// //  add reverb https://blog.demofox.org/2015/03/17/diy-synth-multitap-reverb/
+// //  add convolution reverb https://blog.demofox.org/2015/03/23/diy-synth-convolution-reverb-1d-discrete-convolution-of-audio-samples/
 
-//  
-//  https://www.musicdsp.org/en/latest/Synthesis/272-randja-compressor.html
-
-
-//  Implement other types of wave from maximilian :
-//      phasorBetween
-//  Add maximilian filters
-//      lores
-//      hires
-//      bandpass
-//      lopass
-//      hipass
+// //  
+// //  https://www.musicdsp.org/en/latest/Synthesis/272-randja-compressor.html
 
 
-//Syntorial
-//  BUILD A SYNTH PATH UI
-//  Pulse width on square waves
+// //  Implement other types of wave from maximilian :
+// //      phasorBetween
+// //  Add maximilian filters
+// //      lores
+// //      hires
+// //      bandpass
+// //      lopass
+// //      hipass
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// //Syntorial
+// //  BUILD A SYNTH PATH UI
+// //  Pulse width on square waves
+
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void LowPass::RenderGUI()
 {

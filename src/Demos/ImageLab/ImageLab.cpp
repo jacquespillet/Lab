@@ -1,7 +1,6 @@
 #include "ImageLab.hpp"
 
-#include "GL/glew.h"
-#include <glm/gtx/quaternion.hpp>
+#include "glad/gl.h"
 
 #include "GL_Helpers/Util.hpp"
 #include <fstream>
@@ -13,6 +12,15 @@
 #include <complex>
 #include <fftw3.h>
 #include <stack>
+
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/norm.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/glm.hpp>
+#include <nfd.h>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 #define MODE 2
 #define DEBUG_INPAINTING 0
@@ -43,7 +51,7 @@ void Curve::BuildPath()
         if(startControl.x < start.x)
         {
             glm::vec2 controlToPoint = start - startControl;
-            startControl += controlToPoint*2;
+            startControl += controlToPoint*2.0f;
         }
 
         glm::vec2 end = controlPoints[i+1].point;
@@ -51,7 +59,7 @@ void Curve::BuildPath()
         if(endControl.x > end.x)
         {
             glm::vec2 controlToPoint = end - endControl;
-            endControl += 2 * controlToPoint;
+            endControl += 2.0f * controlToPoint;
         }      
         double stepSize = 1 / (double)stepsPerCurve;
         double xu = 0.0 , yu = 0.0;
@@ -154,7 +162,7 @@ bool Curve::Render(ImDrawList* drawList, ImU32 curveColor)
         if(startControl.x < start.x)
         {
             glm::vec2 controlToPoint = start - startControl;
-            startControl += controlToPoint*2;
+            startControl += controlToPoint*2.0f;
         }
 
         glm::vec2 end = GraphToScreen(controlPoints[i+1].point);
@@ -162,12 +170,12 @@ bool Curve::Render(ImDrawList* drawList, ImU32 curveColor)
         if(endControl.x > end.x)
         {
             glm::vec2 controlToPoint = end - endControl;
-            endControl += 2 * controlToPoint;
+            endControl += 2.0f * controlToPoint;
         }
         
-        drawList->AddBezierCurve(ImVec2(start.x, start.y), ImVec2(startControl.x, startControl.y),
-                                 ImVec2(endControl.x, endControl.y), ImVec2(end.x, end.y), 
-                                 curveColor, 1);
+        // drawList->AddBezierCurve(ImVec2(start.x, start.y), ImVec2(startControl.x, startControl.y),
+        //                          ImVec2(endControl.x, endControl.y), ImVec2(end.x, end.y), 
+        //                          curveColor, 1);
         
         drawList->AddLine(ImVec2(start.x, start.y), ImVec2(startControl.x, startControl.y), IM_COL32(128,128,128,255), 1);
         drawList->AddLine(ImVec2(end.x, end.y), ImVec2(endControl.x, endControl.y), IM_COL32(128,128,128,255), 1);
@@ -562,6 +570,7 @@ bool ImageProcessStack::RenderGUI()
         if(ImGui::Button("LaplacianPyramid")) AddProcess(new LaplacianPyramid(true));
         if(ImGui::Button("MultiResComposite")) AddProcess(new MultiResComposite(true));
         if(ImGui::Button("PatchInpainting")) AddProcess(new PatchInpainting(true));
+        if(ImGui::Button("Seam Carving")) AddProcess(new SeamCarvingResize(true));
 
         ImGui::EndPopup();
     }
@@ -1698,7 +1707,7 @@ void AddGradient::RecalculateKernel()
         for(int j=0; j<intLength; j++)
         {
             float t = (float)j / (float)intLength;
-            glm::vec3 color = glm::lerp(prevColor, nextColor, t);
+            glm::vec3 color = glm::mix(prevColor, nextColor, t);
             gradientData[runningInx + j] = glm::vec4(color  ,1);
         }
         runningInx += intLength;
@@ -1944,10 +1953,10 @@ void Dilation::Unload()
 
 //
 //------------------------------------------------------------------------
-AddImage::AddImage(bool enabled, char newFileName[128]) : ImageProcess("AddImage", "shaders/AddImage.glsl", enabled)
+AddImage::AddImage(bool enabled, std::string newFileName) : ImageProcess("AddImage", "shaders/AddImage.glsl", enabled)
 {
-    strcpy(this->fileName, newFileName);
-    if(strcmp(this->fileName, "")!=0) 
+    this->fileName = newFileName;
+    if(fileName != "") 
     {
         TextureCreateInfo tci = {};
         tci.generateMipmaps =false;
@@ -1981,8 +1990,18 @@ bool AddImage::RenderGui()
     bool changed=false;
     changed |= ImGui::DragFloat("multiplier", &multiplier, 0.001f);
     
-    filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
-    
+    // filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    if(ImGui::Button("Load"))
+    {
+        nfdchar_t *LoadPath = 0;
+        nfdresult_t Result = NFD_OpenDialog(NULL, NULL, &LoadPath);
+        if(Result == NFD_OKAY)
+        {
+            fileName = std::string(LoadPath);
+            filenameChanged=true;
+        }        
+    }
+
     if(filenameChanged)
     {
         TextureCreateInfo tci = {};
@@ -2037,10 +2056,10 @@ void AddImage::Process(GLuint textureIn, GLuint textureOut, int width, int heigh
 
 //
 //------------------------------------------------------------------------
-MultiplyImage::MultiplyImage(bool enabled, char newFileName[128]) : ImageProcess("MultiplyImage", "shaders/MultiplyImage.glsl", enabled)
+MultiplyImage::MultiplyImage(bool enabled, std::string newFilename) : ImageProcess("MultiplyImage", "shaders/MultiplyImage.glsl", enabled)
 {
-    strcpy(this->fileName, newFileName);
-    if(strcmp(this->fileName, "")!=0) filenameChanged=true;
+    this->fileName = newFilename;
+    if(this->fileName != "") filenameChanged=true;
 }
 
 
@@ -2058,7 +2077,17 @@ bool MultiplyImage::RenderGui()
     bool changed=false;
     changed |= ImGui::DragFloat("multiplier", &multiplier, 0.001f);
     
-    filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    // filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    if(ImGui::Button("Load"))
+    {
+        nfdchar_t *LoadPath = 0;
+        nfdresult_t Result = NFD_OpenDialog(NULL, NULL, &LoadPath);
+        if(Result == NFD_OKAY)
+        {
+            fileName = std::string(LoadPath);
+            filenameChanged=true;
+        }        
+    }
     
     if(filenameChanged)
     {
@@ -2429,13 +2458,13 @@ bool PenDraw::MouseReleased()
 
 //
 //------------------------------------------------------------------------
-HardComposite::HardComposite(bool enabled, char* newFileName) : ImageProcess("HardComposite", "", enabled)
+HardComposite::HardComposite(bool enabled, std::string newFileName) : ImageProcess("HardComposite", "", enabled)
 {
     CreateComputeShader("shaders/HardCompositeViewMask.glsl", &viewMaskShader);
     CreateComputeShader("shaders/HardComposite.glsl", &compositeShader);
     
-    strcpy(this->fileName, newFileName);
-    if(strcmp(this->fileName, "")!=0) 
+    this->fileName = newFileName;
+    if(this->fileName != "") 
     {
         TextureCreateInfo tci = {};
         tci.generateMipmaps =false;
@@ -2534,7 +2563,17 @@ bool HardComposite::RenderGui()
     }
 
     ImGui::Separator();
-    filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    if(ImGui::Button("Load"))
+    {
+        nfdchar_t *LoadPath = 0;
+        nfdresult_t Result = NFD_OpenDialog(NULL, NULL, &LoadPath);
+        if(Result == NFD_OKAY)
+        {
+            fileName = std::string(LoadPath);
+            filenameChanged=true;
+        }        
+    }
+    
     if(filenameChanged)
     {
         TextureCreateInfo tci = {};
@@ -2791,7 +2830,7 @@ void SeamCarvingResize::Process(GLuint textureIn, GLuint textureOut, int width, 
                     //Go down, and accumulate the costs
                     for(int y=1; y<height; y++)
                     {
-                        for(int x=0; x<currentWidth; x++)
+                        for(int x=1; x<currentWidth; x++)
                         {
                             int inx = y * currentWidth + x; 
                             costs[inx] = gradient[y * currentWidth + x];
@@ -3568,7 +3607,7 @@ bool PatchInpainting::MouseReleased()
 //
 //
 //------------------------------------------------------------------------
-MultiResComposite::MultiResComposite(bool enabled, char* newFileName) : ImageProcess("MultiResComposite", "shaders/MultiResComposite.glsl", enabled)
+MultiResComposite::MultiResComposite(bool enabled, std::string newFileName) : ImageProcess("MultiResComposite", "shaders/MultiResComposite.glsl", enabled)
 {
     CreateComputeShader("shaders/HardCompositeViewMask.glsl", &viewMaskShader);
     
@@ -3582,8 +3621,8 @@ MultiResComposite::MultiResComposite(bool enabled, char* newFileName) : ImagePro
     destPyramid.gaussianPyramid.gaussianBlur.sigma = sigma;
     destPyramid.gaussianPyramid.gaussianBlur.size = size;
 
-    strcpy(this->fileName, newFileName);
-    if(strcmp(this->fileName, "")!=0) 
+    this->fileName = newFileName;
+    if(this->fileName != "") 
     {
         TextureCreateInfo tci = {};
         tci.generateMipmaps =false;
@@ -3711,7 +3750,17 @@ bool MultiResComposite::RenderGui()
     }
 
     ImGui::Separator();
-    filenameChanged |= ImGui::InputText("File Name", fileName, IM_ARRAYSIZE(fileName));
+    if(ImGui::Button("Load"))
+    {
+        nfdchar_t *LoadPath = 0;
+        nfdresult_t Result = NFD_OpenDialog(NULL, NULL, &LoadPath);
+        if(Result == NFD_OKAY)
+        {
+            fileName = std::string(LoadPath);
+            filenameChanged=true;
+        }        
+    }
+
     if(filenameChanged)
     {
         TextureCreateInfo tci = {};
@@ -4873,13 +4922,13 @@ bool RegionProperties::RenderOutputGui()
             ImGui::Checkbox("Draw Axes", &regions[i].DrawAxes);
             if(regions[i].DrawAxes)
             {
-                glm::vec2 axis1 = glm::normalize(regions[i].eigenVector1) * 2 * sqrt(regions[i].eigenValue1) ;
+                glm::vec2 axis1 = glm::normalize(regions[i].eigenVector1) * 2.0f * sqrt(regions[i].eigenValue1) ;
                 drawList->AddLine(
                     ImVec2(pos),
                     ImVec2(pos.x + axis1.x, pos.y + axis1.y),
                     IM_COL32(255,0,0,255)
                 );
-                glm::vec2 axis2 = glm::normalize(regions[i].eigenVector2) * 2 * sqrt(regions[i].eigenValue2) ;
+                glm::vec2 axis2 = glm::normalize(regions[i].eigenVector2) * 2.0f * sqrt(regions[i].eigenValue2) ;
                 drawList->AddLine(
                     ImVec2(pos),
                     ImVec2(pos.x + axis2.x, pos.y + axis2.y),
@@ -5555,8 +5604,8 @@ void HoughTransform::Process(GLuint textureIn, GLuint textureOut, int width, int
                         glm::vec2 direction = glm::normalize(x2-x1);
                         
                         //line endpoints
-                        x2 = x1 + direction * 10000;
-                        x1 = x1 - direction * 10000;
+                        x2 = x1 + direction * 10000.0f;
+                        x1 = x1 - direction * 10000.0f;
                         
                         //Cartesian to image space
                         glm::vec2 halfSize(width/2, height/2);
@@ -6254,6 +6303,20 @@ void FFTBlur::Process(GLuint textureIn, GLuint textureOut, int width, int height
 ImageLab::ImageLab() {
 }
 
+void ImageLab::SaveImage(std::string FilePath)
+{
+    struct rgba {uint8_t r, g, b, a;};
+    std::vector<rgba> ImageByte(imageProcessStack.outputImage.size());
+    for(int i=0; i<imageProcessStack.outputImage.size(); i++)
+    {
+        ImageByte[i].r = (uint8_t) glm::clamp((int32_t)(imageProcessStack.outputImage[i].r * 255.0f), 0, 255);
+        ImageByte[i].g = (uint8_t) glm::clamp((int32_t)(imageProcessStack.outputImage[i].g * 255.0f), 0, 255);
+        ImageByte[i].b = (uint8_t) glm::clamp((int32_t)(imageProcessStack.outputImage[i].b * 255.0f), 0, 255);
+        ImageByte[i].a = (uint8_t) glm::clamp((int32_t)(imageProcessStack.outputImage[i].a * 255.0f), 0, 255);
+    }
+
+    int Res = stbi_write_png(FilePath.c_str(), imageProcessStack.width, imageProcessStack.height, 4, ImageByte.data(), imageProcessStack.width * 4);
+}
 
 void ImageLab::Load() {
     MeshShader = GL_Shader("shaders/ImageLab/Filter.vert", "", "shaders/ImageLab/Filter.frag");
@@ -6264,9 +6327,9 @@ void ImageLab::Load() {
     // imageProcessStack.AddProcess(new AddImage(true, "resources\\StripesHQ.png"));
     // imageProcessStack.AddProcess(new AddImage(true, "resources\\Stripes.png"));
     // imageProcessStack.AddProcess(new AddImage(true, "resources\\StripesHoriz.png"));
-    imageProcessStack.AddProcess(new AddImage(true, "resources\\Tom.PNG"));
+    imageProcessStack.AddProcess(new AddImage(true, "resources\\Peppers.PNG"));
     // imageProcessStack.AddProcess(new AddImage(true, "resources/peppers.png"));
-    imageProcessStack.AddProcess(new SeamCarvingResize(true));
+    // imageProcessStack.AddProcess(new SeamCarvingResize(true));
     // imageProcessStack.AddProcess(new Dithering(true));
     // imageProcessStack.AddProcess(new FFTBlur(true));
     // imageProcessStack.AddProcess(new RegionProperties(true));
@@ -6318,6 +6381,17 @@ void ImageLab::RenderGUI() {
         shouldProcess=true;
     }
 
+    if(ImGui::Button("Save Image"))
+    {
+        nfdchar_t *SavePath = 0;
+        nfdresult_t Result = NFD_SaveDialog(NULL, NULL, &SavePath);
+
+        if(Result == NFD_OKAY)
+        {
+            SaveImage(SavePath);
+        }        
+    }
+    
     shouldProcess |= imageProcessStack.RenderGUI();
     ImGui::End();    
 
@@ -6366,7 +6440,6 @@ void ImageLab::RenderGUI() {
         if(io.MouseClicked[0])  shouldProcess |= imageProcessStack.imageProcesses[i]->MousePressed();
         if(io.MouseReleased[0]) shouldProcess |= imageProcessStack.imageProcesses[i]->MouseReleased();
     }
-
 
     ImGui::End();
 

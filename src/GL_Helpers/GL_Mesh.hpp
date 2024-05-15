@@ -5,7 +5,7 @@
 #include "GL_Helpers/GL_Shader.hpp"
 #include "GL_Camera.hpp"
 
-#include <GL/glew.h>
+#include <glad/gl.h>
 
 class GL_Mesh {
 public:

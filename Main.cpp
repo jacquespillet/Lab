@@ -6,7 +6,7 @@
 #include "imgui_impl_opengl3.h"
 
 #include <stdio.h>
-#include <GL/glew.h>
+#include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
 
@@ -139,11 +139,11 @@ public:
         glfwMakeContextCurrent(window);
         glfwSwapInterval(1); // Enable vsync
 
-        bool err = glewInit() != GLEW_OK;
-        if (err)
-        {
-            fprintf(stderr, "Failed to initialize OpenGL loader!\n");
-            return 1;
+
+        int version = gladLoadGL(glfwGetProcAddress);
+        if (version == 0) {
+            printf("Failed to initialize OpenGL context\n");
+            exit(0);
         }
 
         glfwSetCursorPosCallback(window, CursorPositionCallback);
@@ -205,7 +205,6 @@ public:
                 if(err==GL_OUT_OF_MEMORY) std::cout << "GL_OUT_OF_MEMORY"<<std::endl;
                 if(err==GL_INVALID_FRAMEBUFFER_OPERATION) std::cout << "GL_INVALID_FRAMEBUFFER_OPERATION"<<std::endl;
                 if(err==GL_CONTEXT_LOST) std::cout << "GL_CONTEXT_LOST"<<std::endl;
-                if(err==GL_TABLE_TOO_LARGE) std::cout << "GL_TABLE_TOO_LARGE1"<<std::endl;
             }
             
             glfwPollEvents();

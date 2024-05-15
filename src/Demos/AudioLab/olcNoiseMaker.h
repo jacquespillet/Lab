@@ -63,10 +63,10 @@
 #include <thread>
 #include <atomic>
 #include <condition_variable>
-using namespace std;
 
 #include <Windows.h>
 
+using namespace std;
 template<class T>
 class olcNoiseMaker
 {
